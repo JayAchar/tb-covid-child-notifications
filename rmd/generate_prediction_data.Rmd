@@ -1,0 +1,162 @@
+---
+title: 'Generate prediction data'
+author: 'Jay Achar'
+date: '`r Sys.time()`'
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_depth: 2
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+suppressMessages(library(tidyverse))
+library(here)
+library(forecast)
+library(imputeTS)
+```
+
+```{r load, message=FALSE, warning=FALSE }
+files <- list.files(here("R"))
+walk(files,
+     ~source(here("R", .x)))
+
+const <- constants()
+
+raw <- read_data("notifications")
+dd <- prepare_data(raw, const = const)
+clean <- prepare_long_data(dd, const = const)
+```
+
+## Predict 2020 notifications
+
+Predictions should be performed on the most granular data available.
+In this analysis, that is country and regional level data by age group and sex.
+
+```{r create-predicted-data }
+# create training data
+## remove 2020
+
+forecasts <- bind_rows(clean[c("region", "imputed_hbc", "global")],
+          .id = "type") %>%
+  filter(year != 2020) %>%
+  group_by(location, age_group, type, sex) %>%
+## nest data by location & age group
+  nest() %>%
+## create time-series
+  mutate(ts = map(data,
+                  function(series) {
+                    select(series, -year) %>%
+                      ts(start = 2014, frequency = 1)
+                  })) %>%
+  forecast_next_year(order = c(2, 0, 0),
+                     drift = TRUE,
+                     lambda = NULL,
+                     log_transform = TRUE)
+
+```
+
+```{r extract-predictions}
+
+predictions <- forecasts %>%
+  mutate(prediction = map(forecast, function(series) {
+    data.frame(
+      point = as.integer(series$point),
+      lower95 = as.integer(series$lower95),
+      upper95 = as.integer(series$upper95)
+    )
+  })) %>%
+  select(type, location, age_group, sex, prediction) %>%
+  unnest(cols = c(prediction))
+
+# required for supp table 4
+saveRDS(predictions,
+        file = here::here("artefacts/granular_predictions.rds"))
+head(predictions)
+```
+
+## Calculate variance
+
+```{r calculate-variance}
+granular_predictions <- predictions %>%
+  mutate(variance = ((upper95 - lower95) / 3.92) ^ 2) %>%
+  select(-lower95, -upper95)
+
+```
+
+## Predictions {.tabset .tabset-pills}
+
+### Main Figure 1
+
+```{r aggregate-age-region}
+final_prediction <- list()
+
+final_prediction$age_region <- granular_predictions %>%
+  filter(type == "region") %>%
+  grouped_predictions(age_group, location)
+
+head(final_prediction$age_region)
+```
+
+### Main Figure 2
+
+```{r aggregate-age-hbc}
+final_prediction$age_hbc <- granular_predictions %>%
+  filter(type == "imputed_hbc") %>%
+  grouped_predictions(age_group, location)
+
+head(final_prediction$age_hbc)
+```
+
+### Supplement Table 3
+
+Global age and sex uses WHO regional data
+
+```{r aggregate-age-sex}
+temp_age_sex <- granular_predictions %>%
+  filter(type == "region") %>%
+  grouped_predictions(age_group, sex)
+
+final_prediction$age_sex <- granular_predictions %>%
+  filter(type == "region") %>%
+  grouped_predictions(age_group) %>%
+  mutate(sex = "all") %>%
+  select(age_group, sex, point, sd) %>%
+  bind_rows(temp_age_sex) %>%
+  arrange(age_group, desc(sex))
+
+head(final_prediction$age_sex)
+
+```
+
+### Supplement Table 4
+
+Uses the same predictions as Main figure 1
+
+Add global prediction
+
+```{r global-age}
+final_prediction$age <- granular_predictions %>%
+  filter(type == "region") %>%
+  grouped_predictions(age_group)
+
+final_prediction$age
+```
+
+```{r}
+# calculate 95% CI
+final_prediction <- lapply(final_prediction,
+                           FUN = function(x) {
+                             x$lower95 = x$point - x$sd * 1.96
+                             x$upper95 = x$point + x$sd * 1.96
+                             x
+                           })
+
+
+saveRDS(final_prediction,
+        file = here::here("artefacts/manuscript_predictions.rds"))
+
+```

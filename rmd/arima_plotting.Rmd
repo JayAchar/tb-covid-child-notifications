@@ -1,0 +1,482 @@
+---
+title: 'Arima model evaluation'
+author: 'Jay Achar'
+date: '`r Sys.time()`'
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_depth: 2
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE)
+suppressMessages(library(tidyverse))
+library(here)
+library(forecast)
+library(ggdist)
+library(patchwork)
+# TODO fix arima_plotting now that data is split by sex
+```
+
+```{r source-functions}
+files <- list.files(here("R"))
+walk(files,
+     ~source(here("R", .x)))
+```
+
+# Important
+
+I've noticed these parsing errors when reading in the data. I haven't looked through
+them, but this would be important to check before finalizing things.
+
+```{r read-in-data, warning=FALSE, message=FALSE}
+raw <- read_data("notifications")
+```
+
+## Define constants
+
+It's often helpful to define standard variables that shouldn't change
+at the top of your script. It's then easy to change later if you want to
+re-run an analysis and also to see quickly what has been applied.
+
+```{r define-constants-functions}
+# returns a list of constants
+const <- constants()
+```
+
+# Data preparation
+
+I tend to do all of my data preparation at the beginning. This might require
+that you move later data cleaning tasks to this area, but having everything
+mixed up is hard to work through for others looking at your code.
+
+Here I've created a list `full_data` which includes to data frames - `region`
+and `hbc`. These represent aggregate notifications counts by age group and year
+for WHO regions and high burden countries respectively.
+
+```{r generate-data-structures}
+dd <- prepare_data(raw, const = const)
+
+clean <- prepare_long_data(dd, const = const)
+
+head(clean$region)
+```
+
+## Create training data set
+
+Next, we create a model training set by removing 2019 and 2020 values from our
+full data. Models will be evaluated on their accuracy to the 2019 data.
+
+```{r training-set}
+
+training <- bind_rows(clean$region,
+                     clean$imputed_hbc,
+                     clean$global, .id = "type")  %>%
+  filter(year < 2019) %>%
+  group_by(type, location, age_group, sex) %>%
+  nest()
+
+head(training)
+
+```
+
+## Create training time-series data
+
+Let's convert each country/region to a time-series object and create
+a `combined` tibble which includes all HB countries and WHO regions for
+ease of evaluation later.
+
+```{r training-ts}
+
+training_ts <- training %>%
+  mutate(ts = map(data, function(series) {
+                 select(series, -year) %>%
+                   ts(start = 2014, frequency = 1)
+               }))
+
+head(training_ts)
+```
+
+# Evaluate different Arima models
+
+## Calculate metrics
+
+Using a range of arima parameters, we will calculate the
+`r paste0(toupper(const$model_performance_metrics), collapse = ", ")` for each model
+then plot them against each other. Each model is fitted to the data for each
+`location` and `age_group` combination before the model metric is calculated.
+The mean of these metric values is presented here since some models do not
+converge on some data sets. Note that a training set is used here, so 2019
+data points are not included.
+
+```{r calculate-metrics}
+
+metrics <-
+    map(const$model_performance_metrics, function(metric) {
+    const$model_params %>%
+      mutate(models = pmap(
+        list(a, b, c, drift),
+        ~ calculate_model_fit(df = training_ts,
+                              c(..1, ..2, ..3),
+                              drift = ..4)
+      )) %>%
+      mutate(
+        model_count = map_int(models, length),
+        sum = map_dbl(models, ~ extract_model_fit(.x, param = metric)),
+        mean = sum / model_count
+      ) %>%
+      arrange(mean)
+  }) %>% set_names(const$model_performance_metrics) %>% bind_rows(.id = "metric")
+
+
+
+metrics <- metrics %>%
+        mutate(d_lab = ifelse(drift == TRUE, "T", "F")) %>%
+        mutate(model_spec = factor(str_c(a, b, c, d_lab))) %>%
+        select(metric, model_spec, everything(), -d_lab)
+
+```
+
+## Plot mean model metrics
+
+```{r metrics-combined}
+metrics %>%
+  filter(model_count > 90) %>%
+  filter(mean < 120) %>%
+  ggplot(aes(x = model_spec,
+         y = mean,
+         color = metric)) +
+  geom_point() +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Combined WHO regional & HBC training data",
+       subtitle = "Only where >90/108 models converged")
+```
+
+## Model selection
+
+Let's take the 10 models with the lowest mean cAIC based on the combined WHO
+and HBC training data sets:
+
+```{r model-selection}
+combined_models <- metrics %>%
+  filter(metric == "aicc") %>%
+  filter(model_count > 90) %>%
+  arrange(mean) %>%
+  slice_head(n = 10)
+
+combined_models
+```
+
+```{r plot-model-selection }
+ggplot(combined_models,
+       aes(x = model_spec,
+           y = mean)) +
+  geom_point() +
+  scale_y_continuous(limits = c(-100, 100)) +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Best cAICC for models trained on combined data",
+       subtitle = "Includes models which converged on >90/108 data sets",
+       x = "Model parameters",
+       y = "Mean cAIC")
+```
+
+## Evaluate model accuracy
+
+Now that we have 10 candidates with the lowest cAIC, lets compare their 2019
+predictions with those that were observed.
+
+What is the best way to assess accuracy here?
+
+I've used mean difference across `location` and `age_group` conbinations here.
+
+Observations:
+
+- Notice how only 2 models converge across all groups
+- Mean difference is reasonably similar across models
+- See below that the distribution of differences is consistent and
+  really very close to 0
+
+```{r model-accuracy, message = FALSE, warning = FALSE}
+
+# prepare observed notifications for 2019
+observed <- prepare_actual_notifications(clean, training_ts)
+
+# uses mean difference as discriminator
+prediction_comparison <- combined_models[2, ] %>%
+        mutate(prediction = pmap(
+                list(a, b, c, drift),
+                ~ evaluate_predictions(observed_data = observed,
+                                       order = c(..1, ..2, ..3),
+                                       drift = ..4,
+                                       function(observed, predicted) {
+                                               predicted - observed
+                                       })
+        )) %>%
+        select(model_spec,
+               prediction, model_count) %>%
+        unnest()
+```
+
+```{r model-accuracy-plot-absolute-mean}
+mean_difference <- prediction_comparison %>%
+  mutate(absolute_diff = abs(prediction)) %>%
+  group_by(model_spec, model_count) %>%
+  summarise(mean = mean(prediction, na.rm = TRUE),
+            abs_mean = mean(absolute_diff, na.rm = TRUE))
+
+
+
+absolute_mean_diff_plot <-  mean_difference %>%
+  ggplot(
+    aes(x = model_spec,
+        y = abs_mean,
+        color = model_count == 108)
+  ) +
+  geom_point(aes(size = model_count)) +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Predictive accuracy",
+       subtitle = "Absolute mean difference between predicted 2019 and observed 2019",
+       y = "Absolute mean difference in notifications")
+
+```
+
+```{r model-accuracy-plot-mean, fig.height=7, fig.width=14}
+mean_diff_plot <-  mean_difference %>%
+  ggplot(
+    aes(x = model_spec,
+        y = mean,
+        color = model_count == 108)
+  ) +
+  geom_point(aes(size = model_count)) +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Predictive accuracy",
+       subtitle = "Mean difference between predicted 2019 and observed 2019",
+       y = "Mean difference in notifications")
+
+
+absolute_mean_diff_plot / mean_diff_plot + plot_layout(guides = "collect")
+```
+
+```{r model-accuracy-variance }
+
+prediction_comparison %>%
+  group_by(model_spec) %>%
+  summarise(mean = mean(prediction, na.rm = TRUE),
+            p5 = quantile(prediction, 0.05, na.rm = TRUE),
+            p50 = quantile(prediction, 0.5, na.rm = TRUE),
+            p95 = quantile(prediction, 0.95, na.rm = TRUE))
+
+
+prediction_comparison %>%
+  filter(!is.na(prediction)) %>%
+  ggplot(aes(x = prediction)) +
+  geom_density(alpha = 0.2) +
+  facet_grid(model_spec ~ .) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  ) +
+  labs(title = "Distribution of prediction error",
+       subtitle = "Difference between 2019 predicted and observed notifications across all age groups",
+       x = "Prediction error",
+       y = "Density")
+```
+
+## Example
+
+Let's review one model specification to visualise evaluate the prediction for
+2019 notifications across countries/regions and age groups.
+
+Notice how the predictions are fairly reasonble across all of the groups.
+
+Notifications are
+
+Model 2, 0, 0 with drift:
+
+```{r example-comparison, warning = FALSE, fig.height=12, fig.width=7}
+ example_predicted <- forecast_next_year(training_ts,
+                                  order = c(2, 0, 0), drift = TRUE)
+
+ example_df <- example_predicted %>%
+   right_join(observed, by = c("location", "age_group")) %>%
+   select(location, age_group, observed, forecast) %>%
+   mutate(predicted = map_dbl(forecast, ~ as.numeric(.x$mean))) %>%
+   pivot_longer(cols = c(observed, predicted),
+                names_to = "count_type", values_to = "notifications")
+
+ example_df %>%
+   ggplot(aes(x = location,
+              y = notifications,
+              color = count_type)) +
+   geom_point() +
+   facet_wrap(age_group ~ ., scales = "free_x") +
+   coord_flip() +
+   theme_minimal() +
+   labs(title = "Predicted against observed 2019 notifciations",
+        subtitle = "(2, 0, 2) with drift",
+        x = "Location",
+        y = "Notifications",
+        color = "Type",
+        caption = "Beware of the different x-axis scales") +
+   theme(
+     legend.position = "bottom"
+   )
+
+```
+
+## Plotting
+
+This is a little complex...I'll try and give a thorough description of what has
+been done.
+
+Essentially there are two data frames being used by `ggplot` to create
+each graphic.
+
+The first data frame includes all of the years and cases from the original data:
+
+```{r list-ts-data }
+# create ts_df list
+ts_list <- clean$region %>%
+  filter(age_group != "014") %>%
+  group_by(age_group) %>%
+  group_split()
+
+head(ts_list[[1]])
+```
+
+You can see that the data frame is specific to a sex/age group. There should
+therefore be 8 data frames in this `ts_list` representing each unique
+combination of sex and age group.
+
+The second data frame includes the 2020 prediction information. This is grouped
+in the same was as the previous data frame:
+
+```{r list-forecast-data }
+forecast_list <- clean$region %>%
+  filter(age_group != "014",
+         year != 2020) %>%
+  group_by(age_group, location) %>%
+  nest() %>%
+  mutate(ts = map(data, function(series) {
+    select(series, -year) %>%
+      ts(start = 2014, frequency = 1)
+  })) %>%
+  forecast_next_year(order = c(2, 0, 0),
+                     drift = TRUE) %>%
+  group_by(age_group) %>%
+  group_split() %>%
+  map(function(group) {
+    data.frame(
+      region = group$location,
+      year = 2020,
+      point = as.numeric(map(group$forecast, ~ .x$mean)),
+      lower95 = as.numeric(map(group$forecast, ~ .x$lower[2])),
+      upper95 = as.numeric(map(group$forecast, ~ .x$upper[2]))
+    )
+  })
+
+head(forecast_list[[1]])
+```
+
+Finally, these two lists of data frames are iterated over using `purrr::map2()`
+to create a list of ggplot objects. An alternative would be to add
+a call to `ggsave` within each iteration and use `purrr::walk2` instead
+of `purrr::map2`. This save the ggplots automatically to disk.
+
+```{r prepare-ribbon-df }
+# create ribbon data frame
+ribbon_df <- map2(ts_list,
+                  forecast_list,
+
+     function(ts, forecast) {
+       ts %>%
+        filter(year == 2019) %>%
+        mutate(lower95 = cases,
+               upper95 = cases) %>%
+        select(region = location,
+               year,
+               point = cases,
+               everything(), -age_group) %>%
+        bind_rows(forecast)
+     })
+```
+
+```{r ts-plots }
+
+age_group_labels <- c("0-4 years",
+                      "5-14 years",
+                      "15+ years")
+
+arima_plots <- pmap(list(ts_list,
+     forecast_list,
+     ribbon_df,
+     age_group_labels),
+     function(ts, forecast, ribbon, age_label) {
+       ggplot(ts,
+              aes(x = year)) +
+         geom_line(aes(y = cases,
+                       color = location)) +
+         geom_point(aes(y = cases,
+                        color = location),
+                    size = 1) +
+         # geom_pointinterval(
+         #   data = forecast,
+         #   aes(
+         #     x = year,
+         #     y = point,
+         #     ymin = lower95,
+         #     ymax = upper95,
+         #     color = region
+         #   ),
+         #   shape = 4,
+         #   size = 2,
+         #   orientation = "vertical"
+         #   # position = position_dodgejust(width = 0.3)
+         # ) +
+         geom_ribbon(
+           data = ribbon,
+           mapping = aes(
+             ymin = lower95,
+             ymax = upper95,
+             group = region,
+             fill = region
+           ),
+           alpha = 0.3
+         ) +
+         # geom_line(
+         #   data = ribbon,
+         #   mapping = aes(x = year,
+         #                 y = point,
+         #                 group = region,
+         #                 color = region),
+         #   linetype = "dashed"
+         # ) +
+         scale_color_discrete(guide = "none") +
+         scale_fill_discrete(guide = "none") +
+         scale_y_sqrt() +
+         labs(x = "Year",
+              y = "Cases (sqrt transformed)",
+              fill = "WHO Region",
+              title = age_label) +
+         theme_minimal()
+
+     }) %>%
+  wrap_plots(ncol = 3) +
+  scale_fill_discrete()
+
+ggsave(here::here("figures/main/main_arima_plots.png"),
+       arima_plots,
+       width = 15,
+       height = 8)
+
+arima_plots
+
+```

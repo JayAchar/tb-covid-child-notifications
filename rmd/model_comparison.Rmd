@@ -1,0 +1,181 @@
+---
+title: 'Comparing ARIMA models'
+author: 'Jay Achar'
+date: '`r Sys.time()`'
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_depth: 2
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+suppressMessages(library(tidyverse))
+library(here)
+library(forecast)
+```
+
+```{r source-functions, include = FALSE}
+files <- list.files(here("R"))
+walk(files,
+     ~source(here("R", .x)))
+# returns a list of constants
+const <- constants()
+
+models <- list(c(2, 0, 0),
+               c(2, 0, 1),
+               c(2, 0, 2))
+
+```
+
+```{r read-in-data, warning = FALSE, message = FALSE, echo = FALSE}
+raw <- read_data("notifications")
+
+```
+
+```{r generate-data-structures, echo = FALSE}
+dd <- prepare_data(raw, const = const)
+
+clean <- prepare_long_data(dd, const = const)
+
+```
+
+## Training data
+
+Three predictive models will be compared with the observed notification data
+for 2019. Predictions will be made on data from the 30 HBCs and the 6 WHO
+regions and will be disaggregated by age group and sex.
+
+The comparison will only use the predicted point estimates.
+
+Similar to the final analysis, linear imputation will be used to replace
+missing values in the 30 HBCs, but not in other country data.
+
+```{r generate-ts-data, include = FALSE }
+ts_list <- bind_rows(clean$region,
+                     clean$imputed_hbc,
+                     clean$global)  %>%
+        filter(year <= 2018) %>%
+        group_by(age_group, location, sex) %>%
+        nest() %>%
+        mutate(ts = map(data, function(series) {
+                select(series, -year) %>%
+                        ts(start = 2014, frequency = 1)
+        }))
+```
+
+```{r comparison-data, warning = FALSE}
+
+predictions_df <- map(models,
+    function(model_params) {
+            forecast_next_year(tbl = ts_list,
+                               order = model_params,
+                               drift = TRUE,
+                               log_transform = TRUE) %>%
+                    group_by(age_group) %>%
+                    group_split() %>%
+                    map(function(group) {
+    data.frame(
+      region = group$location,
+      model = paste0(as.character(model_params), collapse = ", "),
+      sex = group$sex,
+      age_group = unique(group$age_group),
+      year = 2019,
+      point = as.numeric(map(group$forecast, ~ .x$point)),
+      lower95 = as.numeric(map(group$forecast, ~ .x$lower95)),
+      upper95 = as.numeric(map(group$forecast, ~ .x$upper95))
+    )
+  })
+    }) %>%
+        reduce(bind_rows)
+
+```
+
+Three models are being assess here - all with drift and log transformations:
+
+```{r present-models, echo = FALSE}
+models
+```
+
+The following models failed to estimate a prediction:
+
+```{r failed-predictions}
+predictions_df %>%
+  filter(is.na(point)) %>%
+  knitr::kable()
+```
+
+```{r comparison-plot }
+
+comparisons_df <- bind_rows(clean) %>%
+        filter(year == 2019) %>%
+        mutate(model = "observed") %>%
+        select(region = location, model, everything(), point = cases) %>%
+        bind_rows(predictions_df) %>%
+        select(-lower95, -upper95) %>%
+  group_by(region, model, year, age_group) %>%
+  summarise(point = sum(point), .groups = "drop") %>%
+  filter(!is.na(point))
+
+comparison_plot <- comparisons_df %>%
+        ggplot(aes(
+                x = region,
+                y = point,
+                color = model
+        )) +
+        geom_point(alpha = 0.4) +
+        facet_wrap(. ~ age_group, scales = "free_x") +
+        coord_flip() +
+        theme_bw() +
+        labs(title = "Comparing 2019 notifications by age and location",
+             subtitle = "Three ARIMA models against observed notifications",
+             x = "Location",
+             y = "Notifications")
+
+ggsave(here::here("figures/dev/model_comparison.png"),
+       comparison_plot,
+       width = 15,
+       height = 8)
+
+comparison_plot
+```
+
+## Compare predictive differences
+
+```{r create-observed, echo = FALSE}
+observed_df <- clean %>%
+  bind_rows(.id = "type") %>%
+  filter(type != "global",
+         year == 2019) %>%
+  select(everything(), observed_cases = cases, -type)
+
+```
+
+```{r}
+
+difference_df <- predictions_df %>%
+  select(location = region,
+         model, sex, age_group,
+         predicted_cases = point) %>%
+  right_join(observed_df, by = c("location", "age_group", "sex")) %>%
+  mutate(diff = observed_cases - predicted_cases)
+
+
+difference_df %>%
+  group_by(model) %>%
+  filter(!is.na(predicted_cases)) %>%
+  summarise(n = n(),
+            total_diff = sum(diff),
+            abs_total_diff = sum(abs(diff)),
+            abs_mean_total_diff = sum(abs(diff)) / n,
+            .groups = "drop") %>%
+  arrange(abs_mean_total_diff) %>%
+  knitr::kable()
+
+```
+
+The model 2, 0, 0 with drift was ultimately chosen. One model within
+this comparison related to this model did not generate a prediction, however,
+when using the full training data it did generate a prediction.

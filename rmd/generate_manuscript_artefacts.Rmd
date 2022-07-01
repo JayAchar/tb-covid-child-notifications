@@ -1,0 +1,851 @@
+---
+title: 'Generate manuscript artefacts'
+author: 'Jay Achar'
+date: '`r Sys.time()`'
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_depth: 2
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(forecast)
+suppressMessages(library(tidyverse))
+library(patchwork)
+library(flextable)
+library(officer)
+library(data.table)
+library(metafor)
+library(ggrepel)
+library(ggpubr)
+library(wbmapdata) # devtools::install_github('petedodd/wbmapdata')
+library(sf)
+
+absspace <- function(x, ...) {
+  format(abs(x), ..., big.mark = " ",
+         scientific = FALSE,
+         trim = TRUE)
+}
+
+files <- list.files(here("R"))
+walk(files,
+     ~source(here("R", .x)))
+# returns a list of constants
+const <- constants()
+
+raw <- suppressWarnings(read_data("notifications"))
+dd <- prepare_data(raw, const = const)
+clean <- prepare_long_data(dd, const = const)
+
+preds <- readRDS(here::here("artefacts/manuscript_predictions.rds"))
+
+
+```
+
+## Figures {.tabset .tabset-pills}
+
+### Main figure 1
+
+```{r main-figure-1 }
+# create ts_df list
+ts_list <- clean$region %>%
+        group_by(location, year, age_group) %>%
+        summarise(cases = sum(cases),
+                  .groups = "drop") %>%
+        group_by(age_group) %>%
+        group_split()
+
+forecast_list <- preds$age_region %>%
+        select(-sd, region = location) %>%
+        mutate(year = 2020) %>%
+        group_by(age_group) %>%
+        group_split()
+
+ribbon_df <- map2(ts_list,
+                  forecast_list,
+     function(ts, forecast) {
+       ts %>%
+        filter(year == 2019) %>%
+        mutate(lower95 = cases,
+               upper95 = cases) %>%
+        select(age_group,
+               region = location,
+               point = cases,
+               lower95, upper95,
+               year) %>%
+        bind_rows(forecast)
+     })
+
+age_group_labels <- c("0-4 years",
+                      "5-14 years",
+                      "15+ years")
+
+arima_plots <- pmap(list(ts_list,
+     forecast_list,
+     ribbon_df,
+     age_group_labels),
+     function(ts, forecast, ribbon, age_label) {
+       ggplot(ts,
+              aes(x = year)) +
+         geom_line(aes(y = cases,
+                       color = location)) +
+         geom_point(aes(y = cases,
+                        color = location),
+                    size = 1) +
+         geom_ribbon(
+           data = ribbon,
+           mapping = aes(
+             ymin = lower95,
+             ymax = upper95,
+             group = region,
+             fill = region
+           ),
+           alpha = 0.3
+         ) +
+         scale_color_discrete(guide = "none") +
+         scale_fill_discrete(guide = "none") +
+         scale_y_sqrt(label = absspace) +
+         labs(x = "Year",
+              y = "Cases (sqrt transformed)",
+              fill = "WHO Region",
+              title = age_label) +
+         theme_minimal()
+
+     }) %>%
+  wrap_plots(ncol = 3) +
+  scale_fill_discrete()
+
+ggsave(here::here("figures/main/main_arima_plots.png"),
+       arima_plots,
+       width = 15,
+       height = 8)
+
+ggsave(here::here("figures/main/main_arima_plots.svg"),
+       arima_plots,
+       width = 15,
+       height = 8)
+
+arima_plots
+```
+
+### Main figure 2
+
+```{r main-figure-2 }
+# Same as PD but does not include 'global'
+hbc_predicted <- preds$age_hbc %>%
+        select(location, age_group, predicted = point)
+
+# notification data
+mf2_data <- clean$raw_hbc %>%
+        filter(year == 2020) %>%
+        group_by(iso3, age_group) %>%
+        summarise(cases = sum(cases), .groups = "drop") %>%
+        left_join(hbc_predicted,
+                  by = c("iso3" = "location", "age_group")) %>%
+        left_join(dd$long$country %>%
+                          select(country, iso3) %>% distinct(),
+                  by = c("iso3")) %>%
+        filter(iso3 != "LBR") %>%
+        mutate(color = NA_character_) %>%
+        select(location = iso3,
+               everything())
+
+# calculate order
+hbc_order <- mf2_data %>%
+        filter(age_group != "15+ years") %>%
+        group_by(country) %>%
+        summarise(
+                dfr = sum(cases - predicted)
+        ) %>%
+        arrange(dfr) %>% pull(country)
+
+# create percentage burden text labels
+age_totals <- mf2_data %>%
+        group_by(age_group) %>%
+        summarise(total = sum(cases))
+
+mf2_data <- mf2_data %>%
+        left_join(age_totals,
+                  by = "age_group") %>%
+        mutate(pctext = 100 * cases / total,
+               pctext = paste0(sprintf(pctext, fmt = '%#.1f'),'%'))
+
+# add HBC29 data
+hb29_df <- mf2_data %>%
+        group_by(age_group) %>%
+        summarise(cases = sum(cases),
+                  predicted = sum(predicted)) %>%
+        mutate(country = "HBC29",
+               pctext = "100%",
+               color = "black")
+
+mf2_data <- bind_rows(mf2_data,
+          hb29_df) %>%
+        mutate(percent_change = 100 * (cases - predicted) / predicted,
+               color = case_when(
+                       is.na(color) & percent_change < 0 ~ "#930000",
+                       is.na(color) & percent_change > 0 ~ "#00639d",
+                       TRUE ~ "black"
+               ))
+
+# add order
+mf2_data$country <- factor(mf2_data$country,
+                           levels = c(rev(hbc_order), "HBC29"),
+                           ordered = TRUE)
+
+
+scl <- 1e2
+mf2 <- ggplot(mf2_data,
+              aes(
+                      x = country,
+                      y = percent_change / scl,
+                      label = pctext,
+                      fill = I(color)
+              )) +
+        geom_bar(stat = "identity") +
+        geom_text(aes(x = country,
+                      y = 90 / scl)) +
+        facet_wrap(~ age_group) +
+        scale_y_continuous(limits = c(-100 / scl, 100 / scl),
+                           label = scales::percent) +
+        coord_flip() +
+        labs(y = "Estimated change in notifications in 2020",
+             x = "Country or countries") +
+        theme_minimal() +
+        theme(
+                panel.border = element_rect(colour = "black",
+                                            size = 1,
+                                            fill = NA)
+        )
+
+ggsave(here::here("figures/main/main_figure_2.png"),
+       mf2,
+       width = 15,
+       height = 8)
+
+ggsave(here::here("figures/main/main_figure_2.svg"),
+       mf2,
+       width = 15,
+       height = 8)
+
+mf2
+```
+
+### Main figure 3
+
+```{r main-figure-3}
+stringency <- read_csv(here::here("data/stringency_index.csv"))
+
+stringency_2020 <- stringency %>%
+        select(-X1, -country_name, iso3 = country_code) %>%
+        pivot_longer(col = -iso3,
+                     names_to = "dates", values_to = "index") %>%
+        filter(str_ends(dates, "2020")) %>%
+        group_by(iso3) %>%
+        summarise(index = mean(index), .groups = "drop")
+
+hbc_predicted <- preds$age_hbc %>%
+        select(location, age_group, predicted = point)
+
+# notification data
+mf3_data <- clean$raw_hbc %>%
+        filter(year == 2020) %>%
+        group_by(iso3, age_group) %>%
+        summarise(cases = sum(cases), .groups = "drop") %>%
+        left_join(hbc_predicted,
+                  by = c("iso3" = "location", "age_group")) %>%
+        left_join(dd$long$country %>%
+                          select(country, iso3) %>% distinct(),
+                  by = c("iso3")) %>%
+        filter(iso3 != "LBR") %>%
+        select(location = iso3,
+               everything(), -country) %>%
+
+        mutate(percent_change = 100 * (cases - predicted) / predicted) %>%
+        left_join(stringency_2020, by = c("location" = "iso3"))
+
+mf3 <- mf3_data %>%
+        filter(!is.na(index)) %>%
+        ggscatter(
+                x = "index",
+                y = "percent_change",
+                add = "reg.line",
+                conf.int = TRUE,
+                xlim = c(23, 70),
+                ylim = c(-100, 50),
+                xlab = "Mean COVID stringency index 2020",
+                ylab = "Percent change in TB notifications"
+        ) +
+        geom_text_repel(aes(label = location)) +
+        facet_wrap(~ age_group, ncol = 1) +
+        stat_cor(
+                aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+      label.x = 25, label.y = 45, size = 4
+      ) + theme_minimal() + grids()
+
+mf3
+
+ggsave(here::here("figures/main/main_figure_3.png"),
+       mf3,
+       width = 7,
+       height = 12)
+
+ggsave(here::here("figures/main/main_figure_3.svg"),
+       mf3,
+       width = 7,
+       height = 12)
+```
+
+### Main table 1
+
+```{r main-table-1}
+
+mt1_data <- clean$global %>%
+  select(-location) %>%
+  mutate(sex = factor(sex,
+                      levels = c("m", "f", "All"),
+                      labels = c("Male", "Female", "All"),
+                      ordered = TRUE)) %>%
+  group_by(age_group) %>%
+  group_split() %>%
+  map(function(x) {
+  wide <- pivot_wider(
+    x,
+    id_cols = year,
+    names_from = sex,
+    values_from = cases
+  ) %>%
+          select(year, Male, Female)
+
+  wide$abs_diff <- wide[[grep("Male", names(wide))]] - wide[[grep("Female", names(wide))]]
+  wide$ratio <- round(wide[[grep("Male", names(wide))]] / wide[[grep("Female", names(wide))]],
+                       3)
+  wide
+  }) %>%
+  purrr::reduce(left_join, by = "year")
+
+mt1 <- flextable(mt1_data) %>%
+  set_header_labels(
+    year = "Year",
+    "year",
+    Female.x = "Female",
+    Male.x = "Male",
+    abs_diff.x = "Difference (n)",
+    ratio.x = "M:F ratio",
+    Female.y = "Female",
+    Male.y = "Male",
+    abs_diff.y = "Difference (n)",
+    ratio.y = "M:F ratio",
+    Female = "Female",
+    Male = "Male",
+    abs_diff = "Difference (n)",
+    ratio = "M:F ratio"
+  ) %>%
+  add_header_row(
+    values = c("", "0-4 years",
+               "5-14 years",
+               "15+ years"),
+    colwidths = c(1, 4, 4, 4)
+  ) %>%
+  set_table_properties(layout = "autofit", width = 1) %>%
+  fontsize(size = 9, part = "all") %>%
+  theme_box()
+mt1
+```
+
+### Main table 2
+
+```{r main-table-2}
+age_group_totals <- clean$global %>%
+        filter(year == 2020) %>%
+        group_by(age_group) %>%
+        summarise(actual = sum(cases),
+                  .groups = "drop") %>%
+        mutate(sex = "all") %>%
+        select(sex, age_group, actual)
+
+
+st3_data <- clean$global %>%
+        filter(year == 2020) %>%
+        select(-location, -year, actual = cases) %>%
+        bind_rows(age_group_totals) %>%
+        arrange(age_group, sex) %>%
+        left_join(preds$age_sex %>% select(-sd, predicted = point),
+                  by = c("age_group", "sex")) %>%
+        mutate(sex = factor(sex, levels = c("m", "f", "all"),
+                            labels = c("Male", "Female", "All"),
+                            ordered = TRUE),
+               predicted_text = glue::glue("{predicted} [{as.integer(lower95)} - {as.integer(upper95)}]")) %>%
+        mutate(percent_text = glue::glue("{round((actual - predicted) / predicted * 100, 1)} [{round((actual - lower95) / lower95 * 100, 1)} - {round((actual - upper95) / upper95 * 100, 1)}]")) %>%
+        mutate(diff_text = glue::glue("{actual - predicted} [{actual - as.integer(lower95)} - {actual - as.integer(upper95)}]")) %>%
+  arrange(age_group, sex)
+
+st3 <- flextable(st3_data,
+                col_keys = c("age_group", "sex", "actual", "predicted_text",
+                             "diff_text", "percent_text")) %>%
+        set_header_labels(sex = "Sex", age_group = "", actual = "Observed notifications",
+                          predicted_text = "Predicted notifications (N, [95% PI])",
+                          diff_text = "Difference (N, [95% PI])", percent_text = "% [95% PI]") %>%
+        set_table_properties(layout = "autofit", width = 1) %>%
+        merge_v(j = ~ age_group) %>%
+        # colformat_double(big.mark = ",", digits = 0) %>%
+        fontsize(size = 9, part = "all") %>%
+        add_footer_row(top = FALSE,
+                       values = c("PI: Prediction Interval"),
+                       colwidths = c(6)) %>%
+        theme_box()
+
+st3
+```
+
+### Supplement figure 1
+
+```{r supp-figure-1, fig.height = 15, fig.width= 10}
+age_region_plots <- clean$region %>%
+  bind_rows(clean$global) %>%
+  group_by(location) %>%
+  nest() %>%
+  mutate(plots = map2(data, location,
+                      function(region, name) {
+    ggplot(data = region,
+           aes(
+             x = year,
+             y = cases / 1000,
+             group = sex,
+             color = sex
+           )) +
+      geom_line() +
+      scale_color_discrete(guide = "none") +
+      facet_wrap(. ~ age_group, scales = "free_y") +
+      theme_minimal() +
+      labs(x = "",
+           y = "Cases (thousands)",
+           title = name) +
+      theme(strip.background = element_blank(),
+            strip.text = element_text())
+
+  }))
+
+
+aggregate_plot <- wrap_plots(age_region_plots$plots, nrow = 7) +
+  plot_annotation(title = "Notifications between 2014 and 2020 by age group and WHO Region",
+                  caption = "Source: WHO Global TB Programme") +
+  scale_color_discrete() +
+  theme(legend.position = "bottom")
+
+ggsave(here::here("figures/supplement/supplement1_age_sex_region_notifcations.png"),
+       plot = aggregate_plot,
+       width = 10,
+       height = 15)
+
+ggsave(here::here("figures/supplement/supplement1_age_sex_region_notifcations.svg"),
+       plot = aggregate_plot,
+       width = 10,
+       height = 15)
+
+aggregate_plot
+```
+
+### Supplement figure 2
+
+```{r supp-fig-2}
+# use non-imputed HBC data
+md <- calculate_sex_meta_data(data = clean$raw_hbc)
+
+sf2_data <- md$ans %>%
+        mutate(iso3 = "SUMMARY") %>%
+        select(iso3,
+               age_group,
+               mid = pred,
+               lo = ci.lb,
+               hi = ci.ub) %>%
+        rbind(md$fans, fill = TRUE) %>%
+        mutate(iso3 = factor(iso3,
+                             levels = c("SUMMARY", levels(md$fans$iso3))))
+
+
+sf2 <- ggplot(sf2_data,
+       aes(x = iso3, y = mid, ymin = lo, ymax = hi)) +
+  geom_point(data = md$M, shape=1, alpha = 0.5) +
+  geom_errorbar(width = 0, col = "blue") +
+        geom_point(col = "blue") +
+  scale_x_discrete(limits = c("SUMMARY", levels(md$fans$iso3))) +
+  scale_y_continuous(label = scales::percent,
+                     limits = c(0.25, 0.75)) +
+  facet_wrap(~age_group) +
+        coord_flip() +
+  theme_minimal() +
+  geom_hline(yintercept = 0.5, col = 2) +
+  labs(y = 'Proportion of notifications from males',
+       x = "Country code & summary")
+
+sf2
+
+ggsave(sf2,
+        file = here('figures/supplement/supplement2_forest.png'),
+       w = 10,
+       h = 7)
+
+ggsave(sf2,
+        file = here('figures/supplement/supplement2_forest.svg'),
+       w = 10,
+       h = 7)
+
+# create manuscript text 
+ratios <- md$ans %>%
+        mutate(across(.cols = where(is.numeric), ~ round(.x * 100, 1)))
+
+strings <- lapply(ratios$age_group,
+       function(age_group) {
+               x <- ratios %>%
+                       filter(age_group == {{age_group}})
+               glue::glue("{x$pred[1]}% (95%CI: {x$ci.lb[1]}% to {x$ci.ub[1]}%)")
+       }) %>% set_names(ratios$age_group)
+
+```
+
+#### Text for manuscript
+
+The meta-analytic summary proportions of notifications from males were: `r strings[["0-4 years"]]`
+for ages 0-4 years; `r strings[["5-14 years"]]` for ages 5-14 years;
+and `r strings[["15+ years"]]`for ages 15+ years
+
+### Supplement figure 3
+
+```{r supp-figure-3}
+countries_u5_change <- dd$long$country %>%
+        filter(year %in% c(2019, 2020)) %>%
+        # add male and female case together
+        pivot_wider(names_from = sex, values_from = cases) %>%
+        mutate(cases = m + f) %>%
+        group_by(iso3, age_group) %>%
+        mutate(percent_change = (cases - lag(cases, 1)) / lag(cases, 1) * 100) %>%
+        filter(year == 2020) %>%
+        filter(!is.na(percent_change)) %>%
+        select(-m, -f) %>%
+        mutate(percent_change = if_else(is.finite(percent_change),
+                                        percent_change, NA_real_)) %>%
+        filter(age_group == "04") %>%
+        ungroup() %>%
+        select(iso3, percent_change) %>%
+        mutate(sqrt_change = sign(percent_change) * sqrt(abs(percent_change)))
+
+countries_u5_change
+
+map_df <- sp::merge(world, countries_u5_change, by = "iso3", all.x = TRUE)
+
+map_sf <- st_as_sf(map_df)
+
+sf3 <- ggplot(data = map_sf,
+       aes(fill = sqrt_change)) +
+        geom_sf() +
+        scale_fill_gradient2(name = "notification change\n(square root of %)",
+                             na.value = "grey") +
+        theme_minimal() +
+  theme(
+    legend.position = c(.1, .45),
+    legend.title.align = 0.5,
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank()
+  )
+
+sf3
+
+ggsave(sf3,
+        file = here('figures/supplement/supplement3_map.png'),
+       w = 10,
+       h = 7)
+
+ggsave(sf3,
+        file = here('figures/supplement/supplement3_map.svg'),
+       w = 10,
+       h = 7)
+
+```
+
+### Supplement figure 4
+
+```{r supp-fig-4}
+
+diff_data <- clean$region %>%
+        group_by(location, age_group, year) %>%
+        summarise(cases = sum(cases),
+                  .groups = "drop") %>%
+        group_by(location, age_group) %>%
+        mutate(diff = cases - lag(cases),
+               percent = round(cases / lag(cases) * 100, 1)) %>%
+        filter(!is.na(diff))
+
+global_diff_data <- clean$region %>%
+        group_by(age_group, year) %>%
+        summarise(cases = sum(cases),
+                  .groups = "drop") %>%
+        group_by(age_group) %>%
+        mutate(diff = cases - lag(cases),
+               percent = round(cases / lag(cases) * 100, 1),
+               location = "Global") %>%
+        filter(!is.na(diff))
+
+sf4_data <- bind_rows(global_diff_data,
+                      diff_data) %>%
+        mutate(location = factor(location,
+                                 levels = c("Global",
+                                            unique(diff_data$location))),
+               alpha = if_else(location == "Global",
+                               1, 0.3))
+
+diff_plot <- ggplot(sf4_data,
+                    aes(x = year,
+                        y = percent,
+                        color = location,
+                        group = location, 
+                        alpha = alpha)) +
+        geom_line() +
+        geom_point(color = "black", size = 0.7) +
+        geom_hline(yintercept = 100, alpha = 0.4) +
+        theme_minimal() +
+        coord_cartesian(ylim = c(50, 150)) +
+        facet_grid(age_group ~ .) +
+        scale_alpha_continuous(guide = "none") +
+
+        labs(y = "Percent change on previous year",
+             x = "Year",
+             color = "WHO Region")
+
+diff_plot
+
+ggsave(here::here("figures/supplement/supplement4_age_region_annual_change.png"),
+       plot = diff_plot)
+
+ggsave(here::here("figures/supplement/supplement4_age_region_annual_change.svg"),
+       plot = diff_plot)
+
+
+```
+
+### Supplement table 1
+
+```{r supp_table-1}
+
+base <- clean$region %>%
+  filter(year >= 2019) %>%
+  group_by(age_group, sex, year) %>%
+  summarise(cases = sum(cases),
+            .groups = "drop")
+
+st1_data <- clean$region %>%
+  filter(year >= 2019) %>%
+  group_by(age_group, year) %>%
+  summarise(cases = sum(cases),
+            .groups = "drop") %>%
+  mutate(sex = "All") %>%
+  bind_rows(base) %>%
+  pivot_wider(names_from = "year",
+              names_prefix = "y_",
+              values_from = cases) %>%
+   mutate(abs_diff = y_2020 - y_2019,
+         perc = round((y_2020 - y_2019) / y_2019 * 100, 2)) %>%
+  mutate(sex = factor(sex,
+                      levels = c("m", "f", "All"),
+                      labels = c("Male", "Female", "All"),
+                      ordered = TRUE)) %>%
+  arrange(age_group, sex)
+
+st1 <- flextable(st1_data,
+                 col_keys = c("age_group", "sex", "y_2019",
+                              "y_2020", "abs_diff", "perc")) %>%
+  set_header_labels(
+    age_group = "",
+    sex = "Sex",
+    y_2019 = "Observed 2019",
+    y_2020 = "Observed 2020",
+    abs_diff = "Difference (N)",
+    perc = "Percent difference (%)"
+  ) %>%
+  set_table_properties(layout = "autofit", width = 1) %>%
+  merge_v(j = ~ age_group) %>%
+  fontsize(size = 9, part = "all") %>%
+  theme_box()
+
+st1
+```
+
+### Supplement table 2
+
+```{r supp-table-2}
+
+st2_all_regions <- clean$global %>%
+  filter(year %in% c(2019, 2020)) %>%
+  group_by(age_group, year) %>%
+  summarise(cases = sum(cases),
+            location = "All",
+            .groups = "drop") %>%
+  select(location, year, age_group, cases)
+
+st2_data <- clean$region %>%
+  filter(year >= 2019) %>%
+  group_by(location, year, age_group) %>%
+  summarise(cases = sum(cases),
+            .groups = "drop") %>%
+  bind_rows(st2_all_regions) %>%
+  pivot_wider(names_from = "year", values_from = cases,
+              names_prefix = "y_" ) %>%
+  mutate(abs_diff = y_2020 - y_2019,
+         perc = round((y_2020 - y_2019) / y_2019 * 100, 2)) %>%
+  mutate(location = factor(location,
+                           levels = c(const$who_regions, "All"),
+                           ordered = TRUE)) %>%
+  arrange(age_group, location)
+
+
+st2 <- flextable(st2_data,
+                 col_keys = c("age_group", "location", "y_2019",
+                              "y_2020", "abs_diff", "perc")) %>%
+  set_header_labels(
+    age_group = "",
+    location = "Region",
+    y_2019 = "Observed 2019",
+    y_2020 = "Observed 2020",
+    abs_diff = "Difference (N)",
+    perc = "Percent difference (%)"
+  ) %>%
+  set_table_properties(layout = "autofit", width = 1) %>%
+  merge_v(j = ~ age_group) %>%
+  fontsize(size = 9, part = "all") %>%
+  theme_box()
+
+st2
+```
+
+### Supplement table 3
+
+```{r supplement-table-3}
+mt2_all_regions <- clean$global %>%
+  filter(year == 2019) %>%
+  group_by(age_group, sex) %>%
+  mutate(sex = ifelse(sex == "m", "Male", "Female")) %>%
+  summarise(cases = sum(cases),
+            location = "All",
+            .groups = "drop") %>%
+  select(location, sex, age_group, cases)
+
+
+mt2_data <- clean$region %>%
+  filter(year == 2019) %>%
+  group_by(location, sex, age_group) %>%
+  summarise(cases = sum(cases),
+            .groups = "drop") %>%
+  mutate(sex = factor(sex,
+                      levels = c("m", "f", "All"),
+                      labels = c("Male", "Female", "All"),
+                      ordered = TRUE)) %>%
+  bind_rows(mt2_all_regions) %>%
+  pivot_wider(names_from = "sex", values_from = cases) %>%
+  mutate(abs_diff = Male - Female,
+         ratio = round(Male / Female, 3)) %>%
+  mutate(location = factor(location,
+                           levels = c(const$who_regions, "All"),
+                           ordered = TRUE)) %>%
+  arrange(age_group, location)
+
+
+mt2 <- flextable(mt2_data,
+                 col_keys = c("age_group", "location", "Male",
+                              "Female", "abs_diff", "ratio")) %>%
+  set_header_labels(
+    age_group = "",
+    location = "Region",
+    abs_diff = "Difference (N)",
+    ratio = "M:F ratio"
+  ) %>%
+  set_table_properties(layout = "autofit", width = 1) %>%
+  merge_v(j = ~ age_group) %>%
+  fontsize(size = 9, part = "all") %>%
+  theme_box()
+
+mt2
+```
+
+### Supplement table 4
+
+```{r supp-table-4}
+age_group_totals <- clean$global %>%
+        filter(year == 2020) %>%
+        group_by(age_group) %>%
+        summarise(actual = sum(cases),
+                  .groups = "drop") %>%
+        mutate(location = "All") %>%
+        select(location, age_group, actual)
+
+predictions_df <-
+  bind_rows(preds$age %>% mutate(location = "All"), preds$age_region) %>%
+  select(-sd, predicted = point)
+
+
+st4_data <- clean$region %>%
+        filter(year == 2020) %>%
+  group_by(location, age_group) %>%
+  summarise(cases = sum(cases),
+            .groups = "drop") %>%
+        rename(actual = cases) %>%
+        bind_rows(age_group_totals) %>%
+        arrange(age_group, location) %>%
+        left_join(predictions_df,
+                  by = c("age_group", "location")) %>%
+        mutate(predicted_text = glue::glue("{predicted} [{as.integer(lower95)} - {as.integer(upper95)}]")) %>%
+        mutate(percent_text = glue::glue("{round((actual - predicted) / predicted * 100, 1)} [{round((actual - lower95) / lower95 * 100, 1)} - {round((actual - upper95) / upper95 * 100, 1)}]")) %>%
+        mutate(diff_text = glue::glue("{actual - predicted} [{actual - as.integer(lower95)} - {actual - as.integer(upper95)}]")) %>%
+  mutate(location = factor(location,
+                           levels = c(const$who_regions, "All"),
+                           ordered = TRUE)) %>%
+  arrange(age_group, location)
+
+st4 <- flextable(st4_data,
+                col_keys = c("age_group", "location", "actual", "predicted_text",
+                             "diff_text", "percent_text")) %>%
+        set_header_labels(location = "WHO Region", age_group = "", actual = "Observed notifications",
+                          predicted_text = "Predicted notifications (N, [95% PI])",
+                          diff_text = "Difference (N, [95% PI])", percent_text = "% [95% PI]") %>%
+        set_table_properties(layout = "autofit", width = 1) %>%
+        merge_v(j = ~ age_group) %>%
+        add_footer_row(top = FALSE,
+                       values = c("PI: Prediction Interval"),
+                       colwidths = c(6)) %>%
+        fontsize(size = 9, part = "all") %>%
+        theme_box()
+
+st4
+```
+
+```{r save-tables}
+
+ps_landscape <- prop_section(page_size = page_size(orient = "landscape"))
+ps_portrait <- prop_section(page_size = page_size(orient = "portrait"))
+
+tables_doc <- read_docx() %>%
+  body_add_par("Main Table 1", style = "heading 1") %>%
+  body_add_flextable(value = mt1) %>%
+  body_add_break() %>%
+  body_add_par("Main Table 2", style = "heading 1") %>%
+  body_add_flextable(value = mt2) %>%
+  body_add_break() %>%
+  body_add_par("Supplement Table 1", style = "heading 1") %>%
+  body_add_flextable(value = st1) %>%
+  body_add_break() %>%
+  body_add_par("Supplement Table 2", style = "heading 1") %>%
+  body_add_flextable(value = st2) %>%
+  body_end_block_section(value = block_section(property = ps_portrait)) %>%
+  body_add_par("Supplement Table 3", style = "heading 1") %>%
+  body_add_flextable(value = st3) %>%
+  body_end_block_section(value = block_section(property = ps_landscape)) %>%
+  body_add_par("Supplement Table 4", style = "heading 1") %>%
+  body_add_flextable(value = st4) %>%
+  body_end_block_section(value = block_section(property = ps_landscape))
+
+print(tables_doc, target = here::here("figures/tables.docx"))
+
+```
