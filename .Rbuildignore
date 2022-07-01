@@ -1,0 +1,6 @@
+^figures$
+^artefacts$
+^\.vscode$
+^data-raw$
+^\.Rproj\.user$
+^.*\.Rproj$

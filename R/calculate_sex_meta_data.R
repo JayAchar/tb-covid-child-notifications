@@ -1,4 +1,12 @@
+#' Calculate sex meta-analysis data
+#'
+#' @param data high-burden country data
+#' @import data.table
+#' @importFrom metafor rma rma.mv ranef transf.ilogit
+#' 
+
 calculate_sex_meta_data <- function(data = clean$hbc) {
+  
         data <- data.table::as.data.table(data)
 
         M <- dcast(data, iso3 + year + age_group ~ sex,
@@ -14,7 +22,7 @@ calculate_sex_meta_data <- function(data = clean$hbc) {
         )]
 
         ## naive meta-analysis
-        res <- rma(
+        res <- metafor::rma(
                 measure = "PLO", xi = m, ni = tot,
                 data = M[age_group == "0-4 years"]
         )

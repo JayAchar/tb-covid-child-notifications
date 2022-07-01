@@ -1,16 +1,39 @@
+#' Extract model fit
+#'
+#' @param models list of models
+#' @param param model parameter to be extracted and added
+#'
+#' @importFrom purrr map_dbl
+#' @return vector of doubles
+
 extract_model_fit <- function(models, param) {
-        map_dbl(
+        tmp <- map_dbl(
                 models,
                 ~ .x[[param]]
-        ) %>% sum()
+        ) 
+        
+        sum(tmp)
 }
 
-safe_arima <- safely(forecast::Arima)
+#TODO how to use this object
+safe_arima <- purrr::safely(forecast::Arima)
 
+#' Fit ARIMA model
+#'
+#' @param df data.frame with nested list column of time-series
+#' @param model_order ARIMA model parameters
+#' @param drift ARIMA model drift parameter
+#' @importFrom dplyr  mutate pull 
+#' @importFrom magrittr %>% 
+#' @importFrom purrr map keep pluck
+#'
+#' @return original list of successfully fitted models
+#'
 calculate_model_fit <- function(df,
                                 model_order,
-                                drift = FALSE,
-                                fit_param = "aic") {
+                                drift = FALSE
+                                # fit_param = "aic"
+                                ) {
         df %>%
                 mutate(new_model = map(
                         ts,
@@ -24,7 +47,25 @@ calculate_model_fit <- function(df,
                 map(~ pluck(.x, "result"))
 }
 
-forecast_next_year <- function(tbl, order, drift, lambda = NULL, log_transform = FALSE) {
+#' Forecast following year
+#'
+#' @param tbl data frame including specific nested list columns
+#' @param order parameters to define ARIMA model
+#' @param drift drift parameter for ARIMA model
+#' @param lambda 	Box-Cox transformation parameter. If lambda="auto", 
+#' then a transformation is automatically selected using BoxCox.lambda. 
+#' The transformation is ignored if NULL. 
+#' Otherwise, data transformed before model is estimated.
+#' @param log_transform logical to log transform count time series
+#'
+#' @importFrom purrr map map_dfc
+#' @importFrom forecast forecast
+
+forecast_next_year <- function(tbl, 
+                               order, 
+                               drift, 
+                               lambda = NULL, 
+                               log_transform = FALSE) {
         if (log_transform) {
                 tbl$ts <- purrr::map(tbl$ts, log1p)
         }
@@ -67,9 +108,23 @@ forecast_next_year <- function(tbl, order, drift, lambda = NULL, log_transform =
         tbl
 }
 
-prepare_actual_notifications <- function(original_data, training_data) {
+#' Prepare observed notifications 
+#' 
+#' Combine cleaned data frames, restrict to specific year and merge with 
+#' training data sets
+#'
+#' @param original_data list of data frames
+#' @param year numeric to define which year to restrict to 
+#' @param training_data training data set
+#'
+#' @importFrom dplyr bind_rows left_join
+#' 
+#'
+prepare_actual_notifications <- function(original_data,
+                                         year = 2019,
+                                         training_data) {
         full_df <- bind_rows(original_data)
-        filtered_df <- filter(full_df, year == 2019)
+        filtered_df <- full_df[which(full_df$year == year), ]
         full_df$year <- NULL
         joined <- left_join(
                 filtered_df,
@@ -82,6 +137,13 @@ prepare_actual_notifications <- function(original_data, training_data) {
         joined
 }
 
+#' Evaluate model prediction
+#'
+#' @param observed data frame of observed notifications
+#' @param predicted data frame of predicted notifications
+#' @param fn function to compare values
+#' @importFrom dplyr left_join
+
 compare_observed_predicted <- function(observed, predicted, fn) {
         predicted <- predicted[, c("location", "age_group", "forecast")]
 
@@ -93,10 +155,20 @@ compare_observed_predicted <- function(observed, predicted, fn) {
         fn(df$observed, df$forecast)
 }
 
+#' Predict and compare model predictions
+#'
+#' @param observed_data data frame of observed notifications
+#' @param order model specification
+#' @param drift model drift parameter
+#' @param evaluation_function function to evaluate observed and predicted
+#'   data
+#' @importFrom purrr map_dbl
+
 evaluate_predictions <- function(observed_data = observed,
                                  order = c(0, 1, 0),
                                  drift = FALSE,
-                                 evaluation_function = function(observed, predicted) {
+                                 evaluation_function = function(observed, 
+                                                                predicted) {
                                          diff <- predicted - observed
                                          mean(diff, na.rm = TRUE)
                                  }) {

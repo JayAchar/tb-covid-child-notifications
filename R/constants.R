@@ -1,3 +1,7 @@
+#' Create analysis constants
+#'
+#' @return list
+
 constants <- function() {
         who_regions <- c("AFR", "AMR", "EMR", "EUR", "SEA", "WPR")
         raw_vars_keep <-
@@ -53,15 +57,15 @@ constants <- function() {
                 )
 
         model_performance_metrics <- c("aic", "aicc", "bic")
-
-        model_params <- do.call(expand_grid, list(
-                a = c(0, 1, 2, 3),
-                b = c(0, 1, 2),
-                c = c(0, 1, 2, 3),
-                drift = c(TRUE, FALSE)
-        )) %>%
-                filter(!(b >= 2 & drift == TRUE))
-
+        
+        tmp <- do.call(expand.grid, list(
+          a = c(0, 1, 2, 3),
+          b = c(0, 1, 2),
+          c = c(0, 1, 2, 3),
+          drift = c(TRUE, FALSE)
+        ))
+        
+        model_params <- tmp[!(tmp$b >= 2 & tmp$drift == TRUE), ]
 
         return(
                 list(
