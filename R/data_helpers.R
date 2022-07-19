@@ -1,7 +1,5 @@
 #' Read in data
 #'
-#' @param file string defining data file
-#'
 #' @return data frame
 #' @export
 #'
@@ -16,12 +14,12 @@ read_data <- function() {
 #'
 #' @param raw data frame of raw notification data
 #' @param const analysis constants
-#' @importFrom dplyr select group_by summarise across starts_with mutate 
+#' @importFrom dplyr select group_by summarise across starts_with mutate
 #'   everything
 #' @importFrom magrittr %>%
 #' @importFrom tidyr pivot_longer separate
 #' @importFrom stringr str_remove
-#' 
+#'
 #' @return list
 #'
 
@@ -33,8 +31,10 @@ prepare_data <- function(raw, const = constants()) {
         wide$region <- wide$country %>%
                 select(-country, -iso3) %>%
                 group_by(g_whoregion, year) %>%
-                summarise(across(starts_with("newrel_"), ~ sum(.x, na.rm = TRUE)),
-                        .groups = "drop"
+                summarise(across(starts_with("newrel_"), ~ sum(.x,
+                        na.rm = TRUE
+                )),
+                .groups = "drop"
                 )
 
         long <- list(
@@ -80,7 +80,7 @@ prepare_data <- function(raw, const = constants()) {
 #' @param lst list of data frames representing clean notification data
 #' @param const analysis constants
 #'
-#' @importFrom dplyr filter mutate select 
+#' @importFrom dplyr filter mutate select
 #' @importFrom magrittr %>%
 
 prepare_long_data <- function(lst, const) {

@@ -3,10 +3,10 @@
 #' @param data high-burden country data
 #' @import data.table
 #' @importFrom metafor rma rma.mv ranef transf.ilogit
-#' 
+#' @importFrom stats fitted predict
+#'
 
 calculate_sex_meta_data <- function(data = clean$hbc) {
-  
         data <- data.table::as.data.table(data)
 
         M <- dcast(data, iso3 + year + age_group ~ sex,
@@ -50,7 +50,7 @@ calculate_sex_meta_data <- function(data = clean$hbc) {
         ## check extraction:
         tmp <- ranef(res.ML)
         F <- tmp$iso3
-        F <- as.data.table(F)
+        F <- data.table::as.data.table(F)
         F$iso3 <- rownames(ranef(res.ML)$iso3)
         fitted(res.ML)
 

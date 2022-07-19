@@ -2,6 +2,9 @@
 title: 'Generate manuscript artefacts'
 author: 'Jay Achar'
 date: '`r Sys.time()`'
+params:
+  save_artefacts: false
+  plot_type: 'png'
 output:
   html_document:
     code_folding: hide
@@ -12,7 +15,6 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-library(here)
 library(forecast)
 suppressMessages(library(tidyverse))
 library(patchwork)
@@ -31,17 +33,15 @@ absspace <- function(x, ...) {
          trim = TRUE)
 }
 
-files <- list.files(here("R"))
-walk(files,
-     ~source(here("R", .x)))
 # returns a list of constants
 const <- constants()
 
-raw <- suppressWarnings(read_data("notifications"))
+raw <- suppressWarnings(read_data())
 dd <- prepare_data(raw, const = const)
 clean <- prepare_long_data(dd, const = const)
 
-preds <- readRDS(here::here("artefacts/manuscript_predictions.rds"))
+preds <- readRDS(paste0(output_dir,
+                        "/manuscript_predictions.rds"))
 
 
 ```
@@ -84,7 +84,7 @@ age_group_labels <- c("0-4 years",
                       "5-14 years",
                       "15+ years")
 
-arima_plots <- pmap(list(ts_list,
+mf1 <- pmap(list(ts_list,
      forecast_list,
      ribbon_df,
      age_group_labels),
@@ -119,17 +119,8 @@ arima_plots <- pmap(list(ts_list,
   wrap_plots(ncol = 3) +
   scale_fill_discrete()
 
-ggsave(here::here("figures/main/main_arima_plots.png"),
-       arima_plots,
-       width = 15,
-       height = 8)
 
-ggsave(here::here("figures/main/main_arima_plots.svg"),
-       arima_plots,
-       width = 15,
-       height = 8)
-
-arima_plots
+mf1
 ```
 
 ### Main figure 2
@@ -222,15 +213,6 @@ mf2 <- ggplot(mf2_data,
                                             fill = NA)
         )
 
-ggsave(here::here("figures/main/main_figure_2.png"),
-       mf2,
-       width = 15,
-       height = 8)
-
-ggsave(here::here("figures/main/main_figure_2.svg"),
-       mf2,
-       width = 15,
-       height = 8)
 
 mf2
 ```
@@ -238,10 +220,10 @@ mf2
 ### Main figure 3
 
 ```{r main-figure-3}
-stringency <- read_csv(here::here("data/stringency_index.csv"))
+stringency <- covidchildtb::stringency_index
 
 stringency_2020 <- stringency %>%
-        select(-X1, -country_name, iso3 = country_code) %>%
+        select(-X, -country_name, iso3 = country_code) %>%
         pivot_longer(col = -iso3,
                      names_to = "dates", values_to = "index") %>%
         filter(str_ends(dates, "2020")) %>%
@@ -289,15 +271,7 @@ mf3 <- mf3_data %>%
 
 mf3
 
-ggsave(here::here("figures/main/main_figure_3.png"),
-       mf3,
-       width = 7,
-       height = 12)
 
-ggsave(here::here("figures/main/main_figure_3.svg"),
-       mf3,
-       width = 7,
-       height = 12)
 ```
 
 ### Main table 1
@@ -369,7 +343,7 @@ age_group_totals <- clean$global %>%
         select(sex, age_group, actual)
 
 
-st3_data <- clean$global %>%
+mt2_data <- clean$global %>%
         filter(year == 2020) %>%
         select(-location, -year, actual = cases) %>%
         bind_rows(age_group_totals) %>%
@@ -384,7 +358,7 @@ st3_data <- clean$global %>%
         mutate(diff_text = glue::glue("{actual - predicted} [{actual - as.integer(lower95)} - {actual - as.integer(upper95)}]")) %>%
   arrange(age_group, sex)
 
-st3 <- flextable(st3_data,
+mt2 <- flextable(mt2_data,
                 col_keys = c("age_group", "sex", "actual", "predicted_text",
                              "diff_text", "percent_text")) %>%
         set_header_labels(sex = "Sex", age_group = "", actual = "Observed notifications",
@@ -399,7 +373,7 @@ st3 <- flextable(st3_data,
                        colwidths = c(6)) %>%
         theme_box()
 
-st3
+mt2
 ```
 
 ### Supplement figure 1
@@ -431,23 +405,15 @@ age_region_plots <- clean$region %>%
   }))
 
 
-aggregate_plot <- wrap_plots(age_region_plots$plots, nrow = 7) +
+sf1 <- wrap_plots(age_region_plots$plots, nrow = 7) +
   plot_annotation(title = "Notifications between 2014 and 2020 by age group and WHO Region",
                   caption = "Source: WHO Global TB Programme") +
   scale_color_discrete() +
   theme(legend.position = "bottom")
 
-ggsave(here::here("figures/supplement/supplement1_age_sex_region_notifcations.png"),
-       plot = aggregate_plot,
-       width = 10,
-       height = 15)
 
-ggsave(here::here("figures/supplement/supplement1_age_sex_region_notifcations.svg"),
-       plot = aggregate_plot,
-       width = 10,
-       height = 15)
 
-aggregate_plot
+sf1
 ```
 
 ### Supplement figure 2
@@ -470,7 +436,7 @@ sf2_data <- md$ans %>%
 
 sf2 <- ggplot(sf2_data,
        aes(x = iso3, y = mid, ymin = lo, ymax = hi)) +
-  geom_point(data = md$M, shape=1, alpha = 0.5) +
+  geom_point(data = md$M, shape = 1, alpha = 0.5) +
   geom_errorbar(width = 0, col = "blue") +
         geom_point(col = "blue") +
   scale_x_discrete(limits = c("SUMMARY", levels(md$fans$iso3))) +
@@ -485,17 +451,9 @@ sf2 <- ggplot(sf2_data,
 
 sf2
 
-ggsave(sf2,
-        file = here('figures/supplement/supplement2_forest.png'),
-       w = 10,
-       h = 7)
 
-ggsave(sf2,
-        file = here('figures/supplement/supplement2_forest.svg'),
-       w = 10,
-       h = 7)
 
-# create manuscript text 
+# create manuscript text
 ratios <- md$ans %>%
         mutate(across(.cols = where(is.numeric), ~ round(.x * 100, 1)))
 
@@ -555,15 +513,7 @@ sf3 <- ggplot(data = map_sf,
 
 sf3
 
-ggsave(sf3,
-        file = here('figures/supplement/supplement3_map.png'),
-       w = 10,
-       h = 7)
 
-ggsave(sf3,
-        file = here('figures/supplement/supplement3_map.svg'),
-       w = 10,
-       h = 7)
 
 ```
 
@@ -598,11 +548,11 @@ sf4_data <- bind_rows(global_diff_data,
                alpha = if_else(location == "Global",
                                1, 0.3))
 
-diff_plot <- ggplot(sf4_data,
+sf4 <- ggplot(sf4_data,
                     aes(x = year,
                         y = percent,
                         color = location,
-                        group = location, 
+                        group = location,
                         alpha = alpha)) +
         geom_line() +
         geom_point(color = "black", size = 0.7) +
@@ -616,13 +566,7 @@ diff_plot <- ggplot(sf4_data,
              x = "Year",
              color = "WHO Region")
 
-diff_plot
-
-ggsave(here::here("figures/supplement/supplement4_age_region_annual_change.png"),
-       plot = diff_plot)
-
-ggsave(here::here("figures/supplement/supplement4_age_region_annual_change.svg"),
-       plot = diff_plot)
+sf4
 
 
 ```
@@ -724,7 +668,7 @@ st2
 ### Supplement table 3
 
 ```{r supplement-table-3}
-mt2_all_regions <- clean$global %>%
+st3_all_regions <- clean$global %>%
   filter(year == 2019) %>%
   group_by(age_group, sex) %>%
   mutate(sex = ifelse(sex == "m", "Male", "Female")) %>%
@@ -734,7 +678,7 @@ mt2_all_regions <- clean$global %>%
   select(location, sex, age_group, cases)
 
 
-mt2_data <- clean$region %>%
+st3_data <- clean$region %>%
   filter(year == 2019) %>%
   group_by(location, sex, age_group) %>%
   summarise(cases = sum(cases),
@@ -743,7 +687,7 @@ mt2_data <- clean$region %>%
                       levels = c("m", "f", "All"),
                       labels = c("Male", "Female", "All"),
                       ordered = TRUE)) %>%
-  bind_rows(mt2_all_regions) %>%
+  bind_rows(st3_all_regions) %>%
   pivot_wider(names_from = "sex", values_from = cases) %>%
   mutate(abs_diff = Male - Female,
          ratio = round(Male / Female, 3)) %>%
@@ -753,7 +697,7 @@ mt2_data <- clean$region %>%
   arrange(age_group, location)
 
 
-mt2 <- flextable(mt2_data,
+st3 <- flextable(st3_data,
                  col_keys = c("age_group", "location", "Male",
                               "Female", "abs_diff", "ratio")) %>%
   set_header_labels(
@@ -767,7 +711,7 @@ mt2 <- flextable(mt2_data,
   fontsize(size = 9, part = "all") %>%
   theme_box()
 
-mt2
+st3
 ```
 
 ### Supplement table 4
@@ -821,7 +765,46 @@ st4 <- flextable(st4_data,
 st4
 ```
 
-```{r save-tables}
+```{r save-plots, eval = params$save_artefacts}
+
+ggsave(paste0(output_dir, "/main_arima_plots.", params$plot_type),
+       mf1,
+       width = 15,
+       height = 8)
+
+ggsave(paste0(output_dir, "/main_figure_2.", params$plot_type),
+       mf2,
+       width = 15,
+       height = 8)
+
+ggsave(paste0(output_dir, "/main_figure_3.", params$plot_type),
+       mf3,
+       width = 7,
+       height = 12)
+
+ggsave(paste0(output_dir, "/supplement1_age_sex_region_notifcations.",
+              params$plot_type),
+       plot = sf1,
+       width = 10,
+       height = 15)
+
+ggsave(sf2,
+        file = paste0(output_dir, "/supplement2_forest.", params$plot_type),
+       w = 10,
+       h = 7)
+
+ggsave(sf3,
+        file = paste0(output_dir, "/supplement3_map.", params$plot_type),
+       w = 10,
+       h = 7)
+
+ggsave(paste0(output_dir, "/supplement4_age_region_annual_change.",
+              params$plot_type),
+       plot = sf4)
+
+```
+
+```{r save-tables, eval=params$save_artefacts}
 
 ps_landscape <- prop_section(page_size = page_size(orient = "landscape"))
 ps_portrait <- prop_section(page_size = page_size(orient = "portrait"))
@@ -846,6 +829,6 @@ tables_doc <- read_docx() %>%
   body_add_flextable(value = st4) %>%
   body_end_block_section(value = block_section(property = ps_landscape))
 
-print(tables_doc, target = here::here("figures/tables.docx"))
+print(tables_doc, target = paste0(output_dir, "/tables.docx"))
 
 ```

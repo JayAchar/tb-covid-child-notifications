@@ -6,9 +6,6 @@
 \usage{
 read_data()
 }
-\arguments{
-\item{file}{string defining data file}
-}
 \value{
 data frame
 }
