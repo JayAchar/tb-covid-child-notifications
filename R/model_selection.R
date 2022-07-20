@@ -159,17 +159,13 @@ compare_observed_predicted <- function(observed, predicted, fn) {
 #' @param order model specification
 #' @param drift model drift parameter
 #' @param evaluation_function function to evaluate observed and predicted
-#'   data
+#'   data - requires tow arguments (observed and predicted)
 #' @importFrom purrr map_dbl
 
 evaluate_predictions <- function(observed_data = observed,
                                  order = c(0, 1, 0),
                                  drift = FALSE,
-                                 evaluation_function = function(observed,
-                                                                predicted) {
-                                         diff <- predicted - observed
-                                         mean(diff, na.rm = TRUE)
-                                 }) {
+                                 evaluation_function) {
         predicted <- forecast_next_year(
                 training_ts,
                 order, drift
