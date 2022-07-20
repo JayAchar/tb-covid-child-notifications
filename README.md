@@ -62,6 +62,102 @@ render_rmd(
 )
 ```
 
+## Docker
+
+As dependencies continue to develop, there's a strong chance that
+the code in this package will no longer execute with newer packages.
+To ensure the package continues to function correctly, a `Dockerfiile`
+has been included in the repository.
+
+To learn about and install Docker, please check their extensive
+[documentation][docker-docs].
+
+### Build docker image
+
+The docker image includes the `covidchildtb` package along with all
+time-stamped (2020-06-30) R dependencies. The R-version is 4.0.4.
+
+The image also serves an instance of RStudio which will be accessible
+through your default web browser when a container is running - see
+instructions below.
+
+To build the docker image, you will first need to download this
+repository:
+
+```bash
+git clone https://github.com/JayAchar/tb-covid-child-notifications.git
+```
+
+Navigate into the newly created directory then build the image with
+the following commands:
+
+```bash
+cd tb-covid-child-notifications
+
+docker build -t childtbcovid:latest .
+```
+
+The build process requires internet access and will take a few minutes
+to complete.
+
+### Start container
+
+After the image has been built, a container needs to be started to
+access the RStudio instance. Choose a directory on your computer
+where you would like to save any files that are created by the
+analysis. Substitue the placeholder in the code below with your
+chosen directory path.
+
+```bash
+docker run --name covidtb -d --rm\
+        -p 127.0.0.1:8787:8787 \
+        -v REPLACE_WITH_YOUR_DIRECTORY:/home/rstudio \
+        childtbcovid:latest
+```
+
+Authentication has been disabled for this image, so access to the
+open port is restricted to the local machine. **It's not recommended to
+keep this container running for long periods** since the image has not
+been optimised for security.
+
+### RStudio
+
+To open RStudio and execute the analysis, open your default web
+browser and navigate to `http://localhost:8787`. You should immediately
+be logged into the RStudio instance that's running in the container.
+
+To be able to access any created files, the `output_dir` must be
+set to `/home/rstudio` as below. Any created files will then be
+available in the directory chosen on your local computer.
+
+```r
+library(covidchildtb)
+
+output_dir <- "/home/rstudio"
+# specify your desired output directory
+render_rmd(
+  "generate_prediction_data.Rmd",
+  output_dir = output_dir
+)
+
+render_rmd(
+  "generate_manuscript_artefacts.Rmd",
+  output_dir = output_dir,
+  save_artefacts = TRUE,
+  plot_type = "png"
+)
+```
+
+### Stop container
+
+In your terminal run the following command to stop the container:
+
+```bash
+docker stop covidtb
+```
+
+Any generated files will be available in your chosen directory.
+
 ## Further work
 
 Currently the templates used for model selection and data quality checking
@@ -74,4 +170,9 @@ be refactored to allow easier execution through the package workflow.
 Please get in touch with [Jay Achar][email] if you have questions about the code
 contained in this repository. foo
 
+[docker-docs]: https://docs.docker.com/desktop/
 [email]: mailto:jay.achar@ki.se?subject=covidchildtb
+
+```
+
+```

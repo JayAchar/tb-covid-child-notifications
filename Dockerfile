@@ -4,6 +4,12 @@ ARG R_PACKAGE_DATE=2022-06-30
 
 ENV DISABLE_AUTH=true
 
+RUN apt-get -y update && \
+    apt-get install -y  libudunits2-dev \
+        libgdal-dev \
+        libgeos-dev \
+        libproj-dev
+
 WORKDIR /usr/src
 COPY . .
 RUN R CMD build .
