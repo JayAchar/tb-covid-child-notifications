@@ -1,7 +1,7 @@
 Package: covidchildtb
 Type: Package
 Title: covidchildtb: Impact of COVID on child TB
-Version: 0.0.0.9000
+Version: 0.1.0.0
 Date: 2022-07-01
 Authors@R: person("Jay", "Achar",
     email = "jay.achar@ki.se",
@@ -34,7 +34,7 @@ Imports:
   stringr (>= 1.4.0),
   tidyr (>= 1.1.3),
   wbmapdata
-Romotes:
+Remotes:
   petedodd/wbmapdata
 Suggests:
     knitr,

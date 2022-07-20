@@ -8,8 +8,7 @@ evaluate_predictions(
   observed_data = observed,
   order = c(0, 1, 0),
   drift = FALSE,
-  evaluation_function = function(observed, predicted) {     diff <- predicted -
-    observed     mean(diff, na.rm = TRUE) }
+  evaluation_function
 )
 }
 \arguments{
@@ -20,7 +19,7 @@ evaluate_predictions(
 \item{drift}{model drift parameter}
 
 \item{evaluation_function}{function to evaluate observed and predicted
-data}
+data - requires tow arguments (observed and predicted)}
 }
 \description{
 Predict and compare model predictions
