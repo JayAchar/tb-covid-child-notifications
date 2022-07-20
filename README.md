@@ -1,5 +1,12 @@
 # COVID Global child TB notifications
 
+![R package build](https://github.com/JayAchar/tb-covid-child-notifications/actions/workflows/r-package-check.yml/badge.svg)
+
+`covidchildtb` is a R package which includes code to analyse global
+tuberculosis notifications. The analysis has been conducted to support
+an academic manuscript which describes the change in global notifications in
+childhood tuberculosis through the COVID pandemic.
+
 ## Installation
 
 The code to recreate this analysis has encapsulated within a R package.
