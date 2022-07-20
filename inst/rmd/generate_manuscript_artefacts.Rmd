@@ -16,7 +16,10 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(forecast)
-suppressMessages(library(tidyverse))
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
 library(patchwork)
 library(flextable)
 library(officer)
