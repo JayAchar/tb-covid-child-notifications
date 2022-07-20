@@ -14,6 +14,6 @@ prepare_actual_notifications(original_data, year = 2019, training_data)
 \item{training_data}{training data set}
 }
 \description{
-Combine cleaned data frames, restrict to specific year and merge with 
+Combine cleaned data frames, restrict to specific year and merge with
 training data sets
 }

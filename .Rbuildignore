@@ -4,3 +4,8 @@
 ^data-raw$
 ^\.Rproj\.user$
 ^.*\.Rproj$
+^Dockerfile$
+^packages\.R$
+^\.github$
+^\.dockerbuildignore$
+^.*\.tar\.gz$

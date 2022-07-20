@@ -13,9 +13,9 @@ forecast_next_year(tbl, order, drift, lambda = NULL, log_transform = FALSE)
 
 \item{drift}{drift parameter for ARIMA model}
 
-\item{lambda}{Box-Cox transformation parameter. If lambda="auto", 
-then a transformation is automatically selected using BoxCox.lambda. 
-The transformation is ignored if NULL. 
+\item{lambda}{Box-Cox transformation parameter. If lambda="auto",
+then a transformation is automatically selected using BoxCox.lambda.
+The transformation is ignored if NULL.
 Otherwise, data transformed before model is estimated.}
 
 \item{log_transform}{logical to log transform count time series}
