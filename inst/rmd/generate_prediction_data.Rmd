@@ -13,20 +13,18 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
-suppressMessages(library(tidyverse))
-library(here)
+library(dplyr)
+library(purrr)
+library(tidyr)
 library(forecast)
 library(imputeTS)
 ```
 
 ```{r load, message=FALSE, warning=FALSE }
-files <- list.files(here("R"))
-walk(files,
-     ~source(here("R", .x)))
 
 const <- constants()
 
-raw <- read_data("notifications")
+raw <- read_data()
 dd <- prepare_data(raw, const = const)
 clean <- prepare_long_data(dd, const = const)
 ```
@@ -60,7 +58,6 @@ forecasts <- bind_rows(clean[c("region", "imputed_hbc", "global")],
 ```
 
 ```{r extract-predictions}
-
 predictions <- forecasts %>%
   mutate(prediction = map(forecast, function(series) {
     data.frame(
@@ -74,7 +71,7 @@ predictions <- forecasts %>%
 
 # required for supp table 4
 saveRDS(predictions,
-        file = here::here("artefacts/granular_predictions.rds"))
+        file = paste0(output_dir, "/granular_predictions.rds"))
 head(predictions)
 ```
 
@@ -157,6 +154,6 @@ final_prediction <- lapply(final_prediction,
 
 
 saveRDS(final_prediction,
-        file = here::here("artefacts/manuscript_predictions.rds"))
+        file = paste0(output_dir, "/manuscript_predictions.rds"))
 
 ```

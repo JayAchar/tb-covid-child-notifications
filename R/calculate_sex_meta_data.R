@@ -1,3 +1,11 @@
+#' Calculate sex meta-analysis data
+#'
+#' @param data high-burden country data
+#' @import data.table
+#' @importFrom metafor rma rma.mv ranef transf.ilogit
+#' @importFrom stats fitted predict
+#'
+
 calculate_sex_meta_data <- function(data = clean$hbc) {
         data <- data.table::as.data.table(data)
 
@@ -14,7 +22,7 @@ calculate_sex_meta_data <- function(data = clean$hbc) {
         )]
 
         ## naive meta-analysis
-        res <- rma(
+        res <- metafor::rma(
                 measure = "PLO", xi = m, ni = tot,
                 data = M[age_group == "0-4 years"]
         )
@@ -42,7 +50,7 @@ calculate_sex_meta_data <- function(data = clean$hbc) {
         ## check extraction:
         tmp <- ranef(res.ML)
         F <- tmp$iso3
-        F <- as.data.table(F)
+        F <- data.table::as.data.table(F)
         F$iso3 <- rownames(ranef(res.ML)$iso3)
         fitted(res.ML)
 

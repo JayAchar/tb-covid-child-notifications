@@ -1,12 +1,27 @@
-read_data <- function(file = c("notifications")) {
-        file <- match.arg(file)
+#' Read in data
+#'
+#' @return data frame
+#' @export
+#'
 
-        name <- dplyr::case_when(
-                file == "notifications" ~ "TB_notifications.csv",
-                TRUE ~ ""
-        )
-        readr::read_csv(here::here("data", name))
+read_data <- function() {
+        covidchildtb::tb_notifications
 }
+
+
+
+#' Create long and wide data sets
+#'
+#' @param raw data frame of raw notification data
+#' @param const analysis constants
+#' @importFrom dplyr select group_by summarise across starts_with mutate
+#'   everything
+#' @importFrom magrittr %>%
+#' @importFrom tidyr pivot_longer separate
+#' @importFrom stringr str_remove
+#'
+#' @return list
+#'
 
 prepare_data <- function(raw, const = constants()) {
         wide <- list(
@@ -16,8 +31,10 @@ prepare_data <- function(raw, const = constants()) {
         wide$region <- wide$country %>%
                 select(-country, -iso3) %>%
                 group_by(g_whoregion, year) %>%
-                summarise(across(starts_with("newrel_"), ~ sum(.x, na.rm = TRUE)),
-                        .groups = "drop"
+                summarise(across(starts_with("newrel_"), ~ sum(.x,
+                        na.rm = TRUE
+                )),
+                .groups = "drop"
                 )
 
         long <- list(
@@ -57,6 +74,14 @@ prepare_data <- function(raw, const = constants()) {
                 long = long
         ))
 }
+
+#' Prepare long analysis data
+#'
+#' @param lst list of data frames representing clean notification data
+#' @param const analysis constants
+#'
+#' @importFrom dplyr filter mutate select
+#' @importFrom magrittr %>%
 
 prepare_long_data <- function(lst, const) {
         raw_countries <- lst$long$country %>%
