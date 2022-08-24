@@ -15,6 +15,7 @@ knitr::opts_chunk$set(echo = TRUE)
 suppressMessages(library(tidyverse))
 library(here)
 library(forecast)
+devtools::load_all()
 ```
 
 ```{r source-functions, include = FALSE}
@@ -31,7 +32,7 @@ models <- list(c(2, 0, 0),
 ```
 
 ```{r read-in-data, warning = FALSE, message = FALSE, echo = FALSE}
-raw <- read_data("notifications")
+raw <- read_data()
 
 ```
 
@@ -109,7 +110,9 @@ predictions_df %>%
 
 ```{r comparison-plot }
 
-comparisons_df <- bind_rows(clean) %>%
+comparisons_df <- bind_rows(clean$region,
+                     clean$imputed_hbc,
+                     clean$global) %>%
         filter(year == 2019) %>%
         mutate(model = "observed") %>%
         select(region = location, model, everything(), point = cases) %>%
@@ -134,10 +137,10 @@ comparison_plot <- comparisons_df %>%
              x = "Location",
              y = "Notifications")
 
-ggsave(here::here("figures/dev/model_comparison.png"),
-       comparison_plot,
-       width = 15,
-       height = 8)
+# ggsave(here::here("figures/dev/model_comparison.png"),
+#        comparison_plot,
+#        width = 15,
+#        height = 8)
 
 comparison_plot
 ```

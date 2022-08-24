@@ -18,6 +18,7 @@ library(here)
 library(forecast)
 library(ggdist)
 library(patchwork)
+devtools::load_all()
 # TODO fix arima_plotting now that data is split by sex
 ```
 
@@ -33,7 +34,7 @@ I've noticed these parsing errors when reading in the data. I haven't looked thr
 them, but this would be important to check before finalizing things.
 
 ```{r read-in-data, warning=FALSE, message=FALSE}
-raw <- read_data("notifications")
+raw <- read_data()
 ```
 
 ## Define constants
@@ -204,10 +205,14 @@ Observations:
 ```{r model-accuracy, message = FALSE, warning = FALSE}
 
 # prepare observed notifications for 2019
-observed <- prepare_actual_notifications(clean, training_ts)
+debugonce(prepare_actual_notifications)
+observed <- prepare_actual_notifications(list(clean$region,
+                                              clean$imputed_hbc,
+                                              clean$global), year = 2019,
+                                         training_ts)
 
 # uses mean difference as discriminator
-prediction_comparison <- combined_models[2, ] %>%
+prediction_comparison <- combined_models %>%
         mutate(prediction = pmap(
                 list(a, b, c, drift),
                 ~ evaluate_predictions(observed_data = observed,

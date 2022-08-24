@@ -18,6 +18,7 @@ library(naniar)
 library(patchwork)
 library(flextable)
 library(officer)
+devtools::load_all()
 ```
 
 ```{r source-functions}
@@ -30,7 +31,7 @@ const <- constants()
 ```
 
 ```{r read-in-data, warning=FALSE}
-raw <- read_data("notifications")
+raw <- read_data()
 # creates a list of country and region specific data frames in
 # wide and long format
 dd <- prepare_data(raw)
@@ -143,8 +144,8 @@ missing <- dd$long$country %>%
                               NA_integer_,
                               cases))
 
-saveRDS(missing,
-        file = here::here("artefacts/missing.rds"))
+# saveRDS(missing,
+#         file = here::here("artefacts/missing.rds"))
 
 ```
 
@@ -177,11 +178,6 @@ hbcdq1 <- flextable(hbc_missing_table) %>%
   theme_box()
 
 ```
-
-```{r}
-  
-```
-
 
 ### Missing by year
 
@@ -579,7 +575,7 @@ aggregated_male %>%
   pull(hb)
 ```
 
-```{r print-docx}
+```{r print-docx, eval=FALSE}
 ps_landscape <- prop_section(page_size = page_size(orient = "landscape"))
 ps_portrait <- prop_section(page_size = page_size(orient = "portrait"))
 
