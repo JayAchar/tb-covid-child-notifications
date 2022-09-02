@@ -36,6 +36,13 @@ absspace <- function(x, ...) {
          trim = TRUE)
 }
 
+lancet_palette <- c("#00458B", 
+                    "#ED2300",
+                    "#43B440",
+                    "#0199B4",
+                    "#915E9F",
+                    "#DF9043")
+
 # returns a list of constants
 const <- constants()
 
@@ -109,8 +116,8 @@ mf1 <- pmap(list(ts_list,
            ),
            alpha = 0.3
          ) +
-         scale_color_discrete(guide = "none") +
-         scale_fill_discrete(guide = "none") +
+         scale_color_discrete(guide = "none", type = lancet_palette) +
+         scale_fill_discrete(guide = "none", type = lancet_palette) +
          scale_y_sqrt(label = absspace) +
          labs(x = "Year",
               y = "Cases (sqrt transformed)",
@@ -120,7 +127,9 @@ mf1 <- pmap(list(ts_list,
 
      }) %>%
   wrap_plots(ncol = 3) +
-  scale_fill_discrete()
+  scale_fill_discrete(type = lancet_palette)
+
+
 
 
 mf1
@@ -564,6 +573,7 @@ sf4 <- ggplot(sf4_data,
         coord_cartesian(ylim = c(50, 150)) +
         facet_grid(age_group ~ .) +
         scale_alpha_continuous(guide = "none") +
+        scale_color_discrete(type = c("#ff0000", lancet_palette)) +
 
         labs(y = "Percent change on previous year",
              x = "Year",
@@ -778,32 +788,37 @@ ggsave(paste0(output_dir, "/main_arima_plots.", params$plot_type),
 ggsave(paste0(output_dir, "/main_figure_2.", params$plot_type),
        mf2,
        width = 15,
-       height = 8)
+       height = 8, bg = "white")
 
 ggsave(paste0(output_dir, "/main_figure_3.", params$plot_type),
        mf3,
        width = 7,
-       height = 12)
+       height = 12,
+       bg = "white")
 
 ggsave(paste0(output_dir, "/supplement1_age_sex_region_notifcations.",
               params$plot_type),
        plot = sf1,
        width = 10,
-       height = 15)
+       height = 15,
+       bg = "white")
 
 ggsave(sf2,
         file = paste0(output_dir, "/supplement2_forest.", params$plot_type),
        w = 10,
-       h = 7)
+       h = 7,
+       bg = "white")
 
 ggsave(sf3,
         file = paste0(output_dir, "/supplement3_map.", params$plot_type),
        w = 10,
-       h = 7)
+       h = 7,
+       bg = "white")
 
 ggsave(paste0(output_dir, "/supplement4_age_region_annual_change.",
               params$plot_type),
-       plot = sf4)
+       plot = sf4, 
+       bg = "white")
 
 ```
 
