@@ -16,6 +16,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(dplyr)
 library(purrr)
 library(tidyr)
+library(ggplot2)
 library(forecast)
 library(imputeTS)
 ```
@@ -55,6 +56,41 @@ forecasts <- bind_rows(clean[c("region", "imputed_hbc", "global")],
                      lambda = NULL,
                      log_transform = TRUE)
 
+```
+
+## Calculate R-squared
+
+```{r}
+forecasts$r_squared <- vapply(
+  forecasts$model,
+  function(m) {
+    observed <-  expm1(m$x)
+    fitted <- expm1(m$fitted)
+    residuals <- fitted - observed
+    ssr <- sum(residuals ^ 2)
+    fitted_mean <- mean(fitted)
+    total_ss <- sum((fitted - fitted_mean) ^ 2)
+
+    return(
+      r2 = 1 - ssr/total_ss
+                )
+  }, numeric(1)
+)
+
+mean(forecasts$r_squared)
+sd(forecasts$r_squared)
+
+mean(forecasts$r_squared[forecasts$r_squared > 0])
+
+# TODO can we calculate the total R-squared rather than the mean values of the
+# individual TS?
+
+ggplot(
+  forecasts,
+  aes(y = r_squared,
+      x = 1)
+) +
+  geom_point()
 ```
 
 ```{r extract-predictions}
