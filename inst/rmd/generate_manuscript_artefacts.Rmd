@@ -36,7 +36,7 @@ absspace <- function(x, ...) {
          trim = TRUE)
 }
 
-lancet_palette <- c("#00458B", 
+lancet_palette <- c("#00458B",
                     "#ED2300",
                     "#43B440",
                     "#0199B4",
@@ -778,6 +778,93 @@ st4 <- flextable(st4_data,
 st4
 ```
 
+### Supplement table 8
+
+```{r supp-table-8}
+
+# format observed
+global_totals <- clean$global %>%
+        filter(year == 2020) %>%
+        mutate(location = "All") %>%
+        select(location, age_group, sex,
+               actual = cases)
+
+observed_df <- clean$region %>%
+        filter(year == 2020) %>%
+  group_by(location, age_group, sex) %>%
+  summarise(cases = sum(cases),
+            .groups = "drop") %>%
+        rename(actual = cases) %>%
+        bind_rows(global_totals) %>%
+        arrange(age_group, location)
+
+stopifnot(nrow(observed_df) == 42)
+
+# predictions
+predicted_df <- bind_rows(preds$age_sex_region %>%
+  ungroup() %>%
+  select(-type),
+
+preds$age_sex %>%
+  filter(sex != "all") %>%
+  mutate(location = "All") %>%
+  select(location, everything(), -sd))
+
+stopifnot(nrow(predicted_df) == 42)
+
+
+interim_st8_data <- observed_df %>%
+  left_join(predicted_df,
+                  by = c("age_group", "location", "sex")) %>%
+  mutate(
+    diff = point - actual,
+    diff_lower95 = lower95 - actual,
+    diff_upper95 = upper95 - actual
+  ) %>%
+        mutate(predicted_text = glue::glue("{diff} [{as.integer(diff_lower95)} - {as.integer(diff_upper95)}]")) %>%
+  mutate(location = factor(location,
+                           levels = c(const$who_regions, "All"),
+                           ordered = TRUE)) %>%
+  arrange(age_group, location)
+
+ratio_df <- interim_st8_data %>%
+  select(location, age_group, sex, diff) %>%
+  tidyr::pivot_wider(names_from = "sex", values_from = "diff") %>%
+  mutate(mf_ratio = round(m / f, 3)) %>%
+  select(-m, -f)
+
+
+st8_data <- interim_st8_data %>%
+  select(-c(
+    "actual",
+    "point",
+    "lower95",
+    "upper95",
+    "diff_lower95",
+    "diff_upper95",
+    "diff"
+  )) %>%
+  tidyr::pivot_wider(names_from = "sex", values_from = "predicted_text") %>%
+  left_join(ratio_df,
+            by = c("location", "age_group"))
+
+st8 <- flextable(st8_data,
+                col_keys = c("age_group", "location", "m", "f", "mf_ratio")) %>%
+        set_header_labels(location = "WHO Region", age_group = "",
+                          m = "Difference in males (N, [95% PI]) ",
+                          f = "Difference in females (N, [95% PI])",
+                          mf_ratio = "M:F difference ratio") %>%
+        set_table_properties(layout = "autofit", width = 1) %>%
+        merge_v(j = ~ age_group) %>%
+        add_footer_row(top = FALSE,
+                       values = c("PI: Prediction Interval"),
+                       colwidths = c(5)) %>%
+        fontsize(size = 9, part = "all") %>%
+        theme_box()
+
+st8
+```
+
 ```{r save-plots, eval = params$save_artefacts}
 
 ggsave(paste0(output_dir, "/main_arima_plots.", params$plot_type),
@@ -817,7 +904,7 @@ ggsave(sf3,
 
 ggsave(paste0(output_dir, "/supplement4_age_region_annual_change.",
               params$plot_type),
-       plot = sf4, 
+       plot = sf4,
        bg = "white")
 
 ```
@@ -845,7 +932,9 @@ tables_doc <- read_docx() %>%
   body_end_block_section(value = block_section(property = ps_landscape)) %>%
   body_add_par("Supplement Table 4", style = "heading 1") %>%
   body_add_flextable(value = st4) %>%
-  body_end_block_section(value = block_section(property = ps_landscape))
+  body_end_block_section(value = block_section(property = ps_landscape)) %>%
+  body_add_par("Supplement Table 8", style = "heading 1") %>%
+  body_add_flextable(value = st8)
 
 print(tables_doc, target = paste0(output_dir, "/tables.docx"))
 

@@ -217,10 +217,26 @@ final_prediction$age <- granular_predictions %>%
 final_prediction$age
 ```
 
+### Supplement table 8
+
+```{r}
+final_prediction$age_sex_region <- predictions %>% 
+  filter(type == "region")
+
+stopifnot(nrow(final_prediction$age_sex_region) == 36)
+```
+
+
+
+
 ```{r}
 # calculate 95% CI
 final_prediction <- lapply(final_prediction,
                            FUN = function(x) {
+                             if ("lower95" %in% names(x)) {
+                               return(x)
+                             }
+                             
                              x$lower95 = x$point - x$sd * 1.96
                              x$upper95 = x$point + x$sd * 1.96
                              x
