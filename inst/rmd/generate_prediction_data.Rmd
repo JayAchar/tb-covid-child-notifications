@@ -62,7 +62,8 @@ forecasts <- bind_rows(clean[c("region", "imputed_hbc", "global")],
 
 ## Calculate R-squared
 
-Below I've calculated the mean R-squared for each of the 222 models:
+Below is the R-squared for the 2019 fit using data including 2014-2019
+data points for all HBCs, WHO regions and global values:
 
 ```{r}
 forecasts$diagnostics <- lapply(
@@ -70,114 +71,65 @@ forecasts$diagnostics <- lapply(
   function(m) {
     observed <-  expm1(m$x)
     fitted <- expm1(m$fitted)
-    residuals <- as.numeric(fitted - observed)
-    ssr <- sum(residuals ^ 2)
-    fitted_mean <- mean(fitted)
-    total_ss <- sum((fitted - fitted_mean) ^ 2)
+    # residuals <- as.numeric(fitted - observed)
+    # ssr <- sum(residuals ^ 2)
+    # fitted_mean <- mean(fitted)
+    # total_ss <- sum((fitted - fitted_mean) ^ 2)
 
     return(
-      list(
-        ssr = ssr,
-        total_ss = total_ss
+      data.frame(
+        observed = tail(as.numeric(observed), 1),
+        fitted = tail(as.numeric(fitted), 1)
+        # ssr = ssr,
+        # total_ss = total_ss
         )
       )
   }
 )
 
-forecasts$r_squared <- vapply(forecasts$diagnostics,
-                              function(m) {
-                                1 - m$ssr / m$total_ss
-                              }, numeric(1))
+fitted_df <- reduce(forecasts$diagnostics, bind_rows)
 
-p1 <- ggplot(
-  forecasts,
-  aes(y = r_squared,
-      x = 1,
-      color = type)
-) +
-  geom_jitter(width = 0.25, height = 0, alpha = 0.4) +
-  theme(
-    axis.text.x = element_blank(),
-    axis.ticks.x = element_blank(),
-    legend.position = "bottom"
-  ) +
-  labs(
-    x = NULL,
-    title = "R-squared for each fitted model"
-  )
+cor(fitted_df$fitted, fitted_df$observed) ^ 2
 
-p1 <- ggMarginal(p1, margins = "y",
-           type = "histogram")
-p1
-
-```
-
-```{r}
-skimr::skim(forecasts$r_squared)
-```
-
-Below are observed and fitted values for the model that generated the R-squared
-of -11.6:
-
-```{r}
-forecasts %>%
-  filter(r_squared < -3) %>%
-  pull(model) %>% list(observed = expm1(.[[1]]$x),
-                       fitted = expm1(.[[1]]$fitted))
-```
-
-### Remove negative outlier
-
-Here, I've recalculated the R-squared for all models, but have excluded
-the one point where R-squared < -4.
-
-```{r}
-p2 <- forecasts %>%
-  filter(r_squared > -4) %>%
-  ggplot(aes(y = r_squared, x = 1, color = type)) +
-  geom_jitter(width = 0.25, height = 0, alpha = 0.4) +
-  theme(
-    axis.text.x = element_blank(),
-    axis.ticks.x = element_blank(),
-    legend.position = "bottom"
-  ) +
-  labs(
-    x = NULL,
-    title = "R-squared for each fitted model",
-    subtitle = "Points R-squared < -4 removed"
-  )
-
-p2 <- ggMarginal(p2, margins = "y",
-           type = "histogram")
-p2
-```
-
-```{r}
-skimr::skim(forecasts$r_squared[which(forecasts$r_squared > -4)])
-```
-
-### Alternative method for calculating R-squared summary statistic
-
-```{r}
-total_ssr <- sum(vapply(forecasts$diagnostics,
-       function(m) {
-         m$ssr
-       }, numeric(1)
-))
-
-total_ss <- sum(vapply(forecasts$diagnostics,
-       function(m) {
-         m$total_ss
-       }, numeric(1)
-))
+ggplot(fitted_df, aes(x = observed, y = fitted)) + 
+  geom_point() +
+  theme_minimal() +
+  labs(title = "Observed and fitted values for 2019",
+       subtitle = glue::glue("Model trained on 2014-2019 data ({nrow(fitted_df)} data points)"))
 
 
-total_r2 <- 1 - total_ssr / total_ss
+ggsave("~/Desktop/covid-children/corr.png",
+       width = 10, height = 7, bg = "white")
+
+
+# forecasts$r_squared <- vapply(forecasts$diagnostics,
+#                               function(m) {
+#                                 1 - m$ssr / m$total_ss
+#                               }, numeric(1))
+# 
+# p1 <- ggplot(
+#   forecasts,
+#   aes(y = r_squared,
+#       x = 1,
+#       color = type)
+# ) +
+#   geom_jitter(width = 0.25, height = 0, alpha = 0.4) +
+#   theme(
+#     axis.text.x = element_blank(),
+#     axis.ticks.x = element_blank(),
+#     legend.position = "bottom"
+#   ) +
+#   labs(
+#     x = NULL,
+#     title = "R-squared for each fitted model"
+#   )
+# 
+# p1 <- ggMarginal(p1, margins = "y",
+#            type = "histogram")
+# p1
 
 ```
 
-When I use the total sum of squared regression (SSR) and total sum of squares
-(SST) from all fitted models, I get an R-squared of `r total_r2`.
 
 ```{r extract-predictions}
 predictions <- forecasts %>%
