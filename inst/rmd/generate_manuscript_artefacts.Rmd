@@ -118,12 +118,19 @@ mf1 <- pmap(list(ts_list,
          ) +
          scale_color_discrete(guide = "none", type = lancet_palette) +
          scale_fill_discrete(guide = "none", type = lancet_palette) +
-         scale_y_sqrt(label = absspace) +
+         scale_y_sqrt(
+           expand = c(0, 0),
+           label = absspace,
+                      # limits = c(0, 100000),
+                      # breaks = c(0, 25000, 50000, 75000, 100000),
+                      minor_breaks = NULL) +
          labs(x = "Year",
-              y = "Cases (sqrt transformed)",
+              y = "Cases notifications",
               fill = "WHO Region",
               title = age_label) +
-         theme_minimal()
+         theme_minimal() +
+         expand_limits(y = 0)
+
 
      }) %>%
   wrap_plots(ncol = 3) +
@@ -865,6 +872,41 @@ st8 <- flextable(st8_data,
 st8
 ```
 
+### Supplement table 9
+
+```{r supp-table-9}
+
+st9_data <- mf2_data %>%
+  select(country, age_group, cases, predicted) %>%
+  pivot_wider(names_from = "age_group",
+              values_from = c(cases, predicted)) %>%
+  select(country,
+         cases_0 = `cases_0-4 years`,
+         pred_0 = `predicted_0-4 years`,
+         cases_5 = `cases_5-14 years`,
+         pred_5 = `predicted_5-14 years`,
+         cases_15 = `cases_15+ years`,
+         pred_15 = `predicted_15+ years`,)
+
+
+st9 <- st9_data %>%
+  flextable() %>%
+  set_header_labels(
+    country = "Country",
+    cases_0 = "Observed 2020",
+    pred_0 = "Predicted 2020",
+    cases_5 = "Observed 2020",
+    pred_5 = "Predicted 2020",
+    cases_15 = "Observed 2020",
+    pred_15 = "Predicted 2020"
+  ) %>%
+  add_header_row(top = TRUE,
+                 values = c("", levels(mf2_data$age_group)),
+                 colwidths = c(1, 2, 2, 2))
+
+st9
+```
+
 ```{r save-plots, eval = params$save_artefacts}
 
 ggsave(paste0(output_dir, "/main_arima_plots.", params$plot_type),
@@ -934,7 +976,9 @@ tables_doc <- read_docx() %>%
   body_add_flextable(value = st4) %>%
   body_end_block_section(value = block_section(property = ps_landscape)) %>%
   body_add_par("Supplement Table 8", style = "heading 1") %>%
-  body_add_flextable(value = st8)
+  body_add_flextable(value = st8) %>%
+  body_add_par("Supplement Table 9", style = "heading 1") %>%
+  body_add_flextable(value = st9)
 
 print(tables_doc, target = paste0(output_dir, "/tables.docx"))
 
