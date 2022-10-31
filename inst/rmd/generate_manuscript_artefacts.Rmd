@@ -95,11 +95,18 @@ age_group_labels <- c("0-4 years",
                       "5-14 years",
                       "15+ years")
 
+y_breaks <- list(
+  c(0, 5000, 10000, 25000, 50000, 75000, 100000),
+  c(0, 10000, 25000, 50000, 75000, 100000, 125000, 150000),
+  c(0, 250000, 500000, 1000000, 1500000, 2000000, 2500000, 3000000)
+)
+
 mf1 <- purrr::pmap(list(ts_list,
      forecast_list,
      ribbon_df,
-     age_group_labels),
-     function(ts, forecast, ribbon, age_label) {
+     age_group_labels,
+     y_breaks),
+     function(ts, forecast, ribbon, age_label, y_break) {
        ggplot(ts,
               aes(x = year)) +
          geom_line(aes(y = cases,
@@ -123,7 +130,7 @@ mf1 <- purrr::pmap(list(ts_list,
            expand = c(0, 0),
            label = absspace,
                       # limits = c(0, 100000),
-                      # breaks = c(0, 25000, 50000, 75000, 100000),
+                      breaks = y_break,
                       minor_breaks = NULL) +
          labs(x = "Year",
               y = "Cases notifications",
@@ -132,13 +139,9 @@ mf1 <- purrr::pmap(list(ts_list,
          theme_minimal() +
          expand_limits(y = 0)
 
-
      }) %>%
   wrap_plots(ncol = 3) +
   scale_fill_discrete(type = lancet_palette)
-
-
-
 
 mf1
 ```
@@ -151,7 +154,7 @@ hbc_predicted <- preds$age_hbc %>%
         select(location, age_group, predicted = point)
 
 # notification data
-mf2_data <- clean$raw_hbc %>%
+mf2_full_data <- clean$raw_hbc %>%
         filter(year == 2020) %>%
         group_by(iso3, age_group) %>%
         summarise(cases = sum(cases), .groups = "drop") %>%
@@ -160,10 +163,12 @@ mf2_data <- clean$raw_hbc %>%
         left_join(dd$long$country %>%
                           select(country, iso3) %>% distinct(),
                   by = c("iso3")) %>%
-        filter(iso3 != "LBR") %>%
         mutate(color = NA_character_) %>%
         select(location = iso3,
                everything())
+
+mf2_data <- mf2_full_data %>%
+  filter(location != "LBR")
 
 # calculate order
 hbc_order <- mf2_data %>%
@@ -872,9 +877,9 @@ st8
 
 ### Supplement table 9
 
-````{r supp-table-9}
+```{r supp-table-9}
 
-st9_data <- mf2_data %>%
+st9_data <- mf2_full_data %>%
   select(country, age_group, cases, predicted) %>%
   pivot_wider(names_from = "age_group",
               values_from = c(cases, predicted)) %>%
@@ -903,6 +908,8 @@ st9 <- st9_data %>%
                  colwidths = c(1, 2, 2, 2))
 
 st9
+```
+
 ### Alternative supplement table 8
 
 ```{r}
@@ -965,7 +972,7 @@ a_st8 <- flextable(a_st8_data,
         theme_box()
 
 a_st8
-````
+```
 
 ```{r save-plots, eval = params$save_artefacts}
 
@@ -1038,7 +1045,7 @@ tables_doc <- read_docx() %>%
   body_add_par("Supplement Table 8", style = "heading 1") %>%
   body_add_flextable(value = st8) %>%
   body_add_par("Alternative supplement Table 8", style = "heading 1") %>%
-  body_add_flextable(value = a_st8)
+  body_add_flextable(value = a_st8) %>%
   body_add_par("Supplement Table 9", style = "heading 1") %>%
   body_add_flextable(value = st9)
 
