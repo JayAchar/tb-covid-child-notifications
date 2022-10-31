@@ -67,6 +67,94 @@ ts_list <- bind_rows(clean$region,
         }))
 ```
 
+```{r train-models, include = FALSE}
+raw_models <- map(models,
+    function(model_params) {
+            forecast_next_year(tbl = ts_list %>% filter(location != "Global"),
+                               order = model_params,
+                               drift = TRUE,
+                               log_transform = TRUE) 
+    })
+
+residuals <- raw_models %>%
+  map(function(df) {
+    map2(df$model,
+         df$data,
+         function(model, data) {
+           fitted <- exp(as.numeric(model$fitted))
+           observed <- data$cases
+           return(
+             list(fitted = fitted,
+                  observed = observed,
+                  residual_cases = (fitted - observed) / mean(observed, 
+                                                              na.rm = TRUE))
+           )
+         })
+  }) %>% setNames(models)
+
+
+residuals_df <- data.frame(do.call(rbind, lapply(residuals[[1]], 
+                                                 function(ts) ts$residual_cases)))
+
+names(residuals_df) <- as.character(2014:2018)
+residuals_df$id <- 1:nrow(residuals_df)
+
+residuals_dfl <- pivot_longer(residuals_df, cols = -id, names_to = "year", values_to = "residuals")
+
+summary_residuals <- residuals_dfl %>% 
+  group_by(year) %>% 
+  summarise(mean = mean(abs(residuals)),
+            med = median(abs(residuals)),
+            sd = sd(residuals)) %>% 
+  pivot_longer(cols = -year,
+               names_to = "param", values_to = "value")
+
+residuals_by_year <- ggplot(
+  residuals_dfl, 
+  aes(x = year, y = residuals, group = id)
+) +
+  geom_point(alpha = 0.1) + 
+  geom_line(alpha = 0.1) 
+
+ggsave(
+  plot = residuals_by_year,
+  filename = "~/Desktop/covid-children/residuals_by_year.png",
+  bg = "white"
+)
+
+residuals_summary_plot <- ggplot(
+  summary_residuals,
+  aes(x = year,
+      y = value,
+      group = param,
+      color = param)
+) +
+  geom_point()
+
+
+ggsave(
+  plot = residuals_summary_plot,
+  filename = "~/Desktop/covid-children/residuals_summary.png",
+  bg = "white"
+)
+
+residuals_density <- residuals_dfl %>% 
+  ggplot(aes(residuals, group = year, 
+             fill = year)) + 
+  geom_density()
+
+
+ggsave(
+  plot = residuals_density,
+  filename = "~/Desktop/covid-children/residuals_density.png",
+  bg = "white"
+)
+
+```
+
+
+
+
 ```{r comparison-data, warning = FALSE}
 
 predictions_df <- map(models,

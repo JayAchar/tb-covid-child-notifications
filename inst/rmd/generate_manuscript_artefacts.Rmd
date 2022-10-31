@@ -27,6 +27,7 @@ library(data.table)
 library(metafor)
 library(ggrepel)
 library(ggpubr)
+library(purrr)
 library(wbmapdata) # devtools::install_github('petedodd/wbmapdata')
 library(sf)
 
@@ -75,7 +76,7 @@ forecast_list <- preds$age_region %>%
         group_by(age_group) %>%
         group_split()
 
-ribbon_df <- map2(ts_list,
+ribbon_df <- purrr::map2(ts_list,
                   forecast_list,
      function(ts, forecast) {
        ts %>%
@@ -94,7 +95,7 @@ age_group_labels <- c("0-4 years",
                       "5-14 years",
                       "15+ years")
 
-mf1 <- pmap(list(ts_list,
+mf1 <- purrr::pmap(list(ts_list,
      forecast_list,
      ribbon_df,
      age_group_labels),
@@ -487,9 +488,7 @@ strings <- lapply(ratios$age_group,
 
 #### Text for manuscript
 
-The meta-analytic summary proportions of notifications from males were: `r strings[["0-4 years"]]`
-for ages 0-4 years; `r strings[["5-14 years"]]` for ages 5-14 years;
-and `r strings[["15+ years"]]`for ages 15+ years
+The meta-analytic summary proportions of notifications from males were: `r strings[["0-4 years"]]` for ages 0-4 years; `r strings[["5-14 years"]]` for ages 5-14 years; and `r strings[["15+ years"]]`for ages 15+ years
 
 ### Supplement figure 3
 
@@ -840,7 +839,6 @@ ratio_df <- interim_st8_data %>%
   mutate(mf_ratio = round(m / f, 3)) %>%
   select(-m, -f)
 
-
 st8_data <- interim_st8_data %>%
   select(-c(
     "actual",
@@ -874,7 +872,7 @@ st8
 
 ### Supplement table 9
 
-```{r supp-table-9}
+````{r supp-table-9}
 
 st9_data <- mf2_data %>%
   select(country, age_group, cases, predicted) %>%
@@ -905,7 +903,69 @@ st9 <- st9_data %>%
                  colwidths = c(1, 2, 2, 2))
 
 st9
-```
+### Alternative supplement table 8
+
+```{r}
+# age groups, WHO regions & global, sexes & all
+
+# prepare predicted
+predictions_df <- preds$age_sex_region %>%
+  ungroup() %>%
+  select(-type) %>%
+  bind_rows(preds$age_region %>% select(-sd) %>% mutate(sex = "All")) %>%
+  bind_rows(preds$age_sex %>% select(-sd) %>% mutate(location = "All",
+                                                     sex = if_else(sex == "all", "All", sex))) %>%
+  arrange(location, age_group)
+
+
+
+# observed data
+# aggregate both sexes
+base_observed <- clean$region %>%
+  filter(year == 2020) %>%
+  bind_rows(clean$global %>% filter(year == 2020) %>%
+              mutate(location = "All"))
+
+observed_df <- base_observed %>%
+  group_by(location, age_group) %>%
+  summarise(cases = sum(cases),
+            .groups = "drop") %>%
+  mutate(sex = "All") %>%
+  bind_rows(base_observed %>% select(-year))
+
+# merge predictions with observed
+a_st8_data <- observed_df %>%
+  left_join(predictions_df,
+            by = c("location", "age_group", "sex")) %>%
+  mutate(sex = factor(sex, levels = c("m", "f", "All"),
+                            labels = c("Male", "Female", "All"),
+                            ordered = TRUE)) %>%
+        mutate(percent_text = glue::glue("{round((cases - point) / point * 100, 1)} [{round((cases - lower95) / lower95 * 100, 1)} - {round((cases - upper95) / upper95 * 100, 1)}]")) %>%
+  select(age_group, location, sex, percent_text) %>%
+  tidyr::pivot_wider(names_from = "sex", values_from = "percent_text") %>%
+  mutate(location = factor(location,
+                           levels = c(const$who_regions, "All"),
+                           ordered = TRUE)) %>%
+  arrange(age_group, location)
+
+a_st8_data
+
+a_st8 <- flextable(a_st8_data,
+                col_keys = c("age_group", "location", "Male", "Female", "All")) %>%
+        set_header_labels(location = "WHO Region", age_group = "",
+                          Male = "Percentage difference in males (%, [95% PI]) ",
+                          Female = "Percentage difference in females (%, [95% PI])",
+                          All = "Percentage difference in all (%, [95% PI])") %>%
+        set_table_properties(layout = "autofit", width = 1) %>%
+        merge_v(j = ~ age_group) %>%
+        add_footer_row(top = FALSE,
+                       values = c("PI: Prediction Interval"),
+                       colwidths = c(5)) %>%
+        fontsize(size = 9, part = "all") %>%
+        theme_box()
+
+a_st8
+````
 
 ```{r save-plots, eval = params$save_artefacts}
 
@@ -977,6 +1037,8 @@ tables_doc <- read_docx() %>%
   body_end_block_section(value = block_section(property = ps_landscape)) %>%
   body_add_par("Supplement Table 8", style = "heading 1") %>%
   body_add_flextable(value = st8) %>%
+  body_add_par("Alternative supplement Table 8", style = "heading 1") %>%
+  body_add_flextable(value = a_st8)
   body_add_par("Supplement Table 9", style = "heading 1") %>%
   body_add_flextable(value = st9)
 
